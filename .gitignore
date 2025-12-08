@@ -1,0 +1,4 @@
+/target
+*.ext4
+vmlinux.bin
+/kernel-images
