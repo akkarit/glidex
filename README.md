@@ -34,7 +34,7 @@ cd glidex
 
 The installer will:
 1. Install Rust (if not present)
-2. Download and install Firecracker v1.13.1
+2. Download and install Firecracker v1.14.0
 3. Build the Glidex binaries
 4. Optionally download sample kernel and rootfs images to `~/.glidex/`
 
@@ -203,7 +203,7 @@ For each running VM:
 - **Linux** (Firecracker only supports Linux)
 - **KVM** enabled (`/dev/kvm` accessible)
 - **Rust 1.85+** (for building)
-- **Firecracker 1.13.1+**
+- **Firecracker 1.14.0+**
 
 ### Enabling KVM
 

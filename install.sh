@@ -9,7 +9,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Versions
-FIRECRACKER_VERSION="v1.13.1"
+FIRECRACKER_VERSION="v1.14.0"
 RUST_MIN_VERSION="1.85.0"
 
 echo -e "${CYAN}"

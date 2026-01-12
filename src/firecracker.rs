@@ -309,6 +309,15 @@ impl FirecrackerProcess {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
+        // Cleanup on timeout: stop console thread, kill and reap the child process
+        running.store(false, Ordering::SeqCst);
+        let _ = console_thread.join();
+        let mut child = child;
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_file(socket_path);
+        let _ = std::fs::remove_file(console_socket_path);
+
         Err(FirecrackerError::SocketConnection(
             "Socket not available after timeout".to_string(),
         ))
@@ -388,6 +397,8 @@ impl FirecrackerProcess {
     pub fn kill(&mut self) -> Result<(), FirecrackerError> {
         self.running.store(false, Ordering::SeqCst);
         self.child.kill()?;
+        // Reap the child process to avoid zombies
+        let _ = self.child.wait();
 
         // Wait for console thread to finish
         if let Some(handle) = self.console_thread.take() {

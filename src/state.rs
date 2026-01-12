@@ -79,19 +79,25 @@ impl VmManager {
         match entry.vm.state {
             VmState::Created | VmState::Stopped => {
                 // Spawn Firecracker process with console socket and log file
-                let process = FirecrackerProcess::spawn(
+                let mut process = FirecrackerProcess::spawn(
                     &entry.vm.socket_path,
                     &entry.vm.console_socket_path,
                     &entry.vm.log_path,
                 )?;
+
+                // Configure the VM, cleanup process on failure
+                if let Err(e) = crate::firecracker::configure_vm(&entry.vm) {
+                    let _ = process.kill();
+                    return Err(e.into());
+                }
+
+                // Start the VM, cleanup process on failure
+                if let Err(e) = crate::firecracker::start_vm(&entry.vm) {
+                    let _ = process.kill();
+                    return Err(e.into());
+                }
+
                 entry.process = Some(process);
-
-                // Configure the VM
-                crate::firecracker::configure_vm(&entry.vm)?;
-
-                // Start the VM
-                crate::firecracker::start_vm(&entry.vm)?;
-
                 entry.vm.state = VmState::Running;
                 Ok(entry.vm.clone())
             }
