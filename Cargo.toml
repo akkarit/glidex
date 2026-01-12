@@ -21,11 +21,14 @@ tabled = "0.17"
 ctrlc = "3"
 nix = { version = "0.29", features = ["term", "fs", "process"] }
 libc = "0.2"
+redb = "3"
+dirs = "6"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 mime = "0.3"
+tempfile = "3"
 
 [[bin]]
 name = "gxctl"

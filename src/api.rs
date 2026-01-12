@@ -144,5 +144,9 @@ fn error_to_response(error: VmManagerError) -> (StatusCode, Json<ApiError>) {
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiError::new("firecracker_error", error.to_string())),
         ),
+        VmManagerError::PersistenceError(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiError::new("persistence_error", error.to_string())),
+        ),
     }
 }

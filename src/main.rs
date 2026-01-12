@@ -1,12 +1,37 @@
 mod api;
 mod firecracker;
 mod models;
+mod persistence;
 mod state;
 
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::Path;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn print_status(msg: &str) {
+    print!("  {}... ", msg);
+    let _ = io::stdout().flush();
+}
+
+fn print_banner() {
+    let db_path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".glidex")
+        .join("glidex.db");
+
+    println!();
+    println!("  ╔═══════════════════════════════════════════╗");
+    println!("  ║            GlideX Control Plane           ║");
+    println!("  ╚═══════════════════════════════════════════╝");
+    println!();
+    println!("  Version:   {}", VERSION);
+    println!("  Database:  {}", db_path.display());
+    println!();
+}
 
 fn check_kvm_access() -> Result<(), String> {
     let kvm_path = Path::new("/dev/kvm");
@@ -42,31 +67,57 @@ fn check_kvm_access() -> Result<(), String> {
 
 #[tokio::main]
 async fn main() {
+    // Print startup banner
+    print_banner();
+
     // Initialize tracing
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "firecracker_control_plane=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "glidex_control_plane=info,tower_http=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
     // Check KVM access before starting
+    print_status("Checking KVM access");
     if let Err(e) = check_kvm_access() {
-        tracing::error!("KVM access check failed:\n{}", e);
+        println!("FAILED");
+        eprintln!("\n{}", e);
         std::process::exit(1);
     }
-    tracing::info!("KVM access: OK");
+    println!("OK");
 
-    // Create VM manager
-    let vm_manager = state::VmManager::new();
+    // Create VM manager with persistence
+    print_status("Opening database");
+    let vm_manager = match state::VmManager::new() {
+        Ok(manager) => manager,
+        Err(e) => {
+            println!("FAILED");
+            eprintln!("\nFailed to initialize VM manager: {}", e);
+            std::process::exit(1);
+        }
+    };
+    println!("OK");
+
+    // Initialize: load persisted VMs and reconcile state
+    print_status("Loading VMs");
+    if let Err(e) = vm_manager.initialize().await {
+        println!("FAILED");
+        eprintln!("\nFailed to initialize VMs from database: {}", e);
+        std::process::exit(1);
+    }
+    let vm_count = vm_manager.list_vms().await.len();
+    println!("OK ({} VMs)", vm_count);
 
     // Create router
     let app = api::create_router(vm_manager).layer(TraceLayer::new_for_http());
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-    tracing::info!("Starting Firecracker control plane on {}", addr);
+    println!();
+    println!("  Listening on http://{}", addr);
+    println!();
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
