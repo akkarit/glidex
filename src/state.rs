@@ -313,4 +313,33 @@ impl VmManager {
         vms.remove(vm_id);
         Ok(())
     }
+
+    /// Shutdown all running VMs. Called during control-plane termination.
+    pub async fn shutdown(&self) {
+        let mut vms = self.vms.write().await;
+        let mut stopped_count = 0;
+
+        for (vm_id, entry) in vms.iter_mut() {
+            if let Some(ref mut process) = entry.process {
+                tracing::info!("Stopping VM {} ({})...", entry.vm.name, vm_id);
+                let _ = process.kill();
+                stopped_count += 1;
+
+                // Update state in DB - log warning if fails
+                if let Err(e) = self.store.update_state(vm_id, VmState::Stopped) {
+                    tracing::warn!(
+                        "Failed to persist VM {} state change to Stopped: {}",
+                        vm_id,
+                        e
+                    );
+                }
+            }
+            entry.process = None;
+            entry.vm.state = VmState::Stopped;
+        }
+
+        if stopped_count > 0 {
+            tracing::info!("Stopped {} running VM(s)", stopped_count);
+        }
+    }
 }

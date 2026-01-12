@@ -7,8 +7,12 @@ mod state;
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Arc;
+use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use crate::state::VmManager;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -110,6 +114,9 @@ async fn main() {
     let vm_count = vm_manager.list_vms().await.len();
     println!("OK ({} VMs)", vm_count);
 
+    // Clone vm_manager for the shutdown handler before passing to router
+    let vm_manager_shutdown = Arc::clone(&vm_manager);
+
     // Create router
     let app = api::create_router(vm_manager).layer(TraceLayer::new_for_http());
 
@@ -117,8 +124,45 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     println!();
     println!("  Listening on http://{}", addr);
+    println!("  Press Ctrl+C to shutdown");
     println!();
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(vm_manager_shutdown))
+        .await
+        .unwrap();
+}
+
+async fn shutdown_signal(vm_manager: Arc<VmManager>) {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    println!();
+    tracing::info!("Shutdown signal received, stopping VMs...");
+
+    // Stop all running Firecracker processes
+    vm_manager.shutdown().await;
+
+    tracing::info!("Shutdown complete");
 }
