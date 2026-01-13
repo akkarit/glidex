@@ -79,25 +79,85 @@ install_rust() {
         # Check if version is sufficient
         if [ "$(printf '%s\n' "$RUST_MIN_VERSION" "$RUST_VERSION" | sort -V | head -n1)" = "$RUST_MIN_VERSION" ]; then
             echo -e "${GREEN}Rust version is sufficient${NC}"
-            return 0
         else
             echo -e "${YELLOW}Rust version is older than ${RUST_MIN_VERSION}, updating...${NC}"
+            if command_exists rustup; then
+                rustup update stable
+            fi
         fi
     else
         echo -e "${YELLOW}Rust is not installed, installing...${NC}"
-    fi
-
-    # Install or update Rust using rustup
-    if command_exists rustup; then
-        echo "Updating Rust via rustup..."
-        rustup update stable
-    else
-        echo "Installing Rust via rustup..."
+        # Install Rust using rustup
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
         source "$HOME/.cargo/env"
     fi
 
+    # Source cargo env if needed
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+
+    # Add wasm32 target for Leptos UI
+    echo "Adding wasm32-unknown-unknown target for UI..."
+    rustup target add wasm32-unknown-unknown
+
     echo -e "${GREEN}Rust installed successfully: $(rustc --version)${NC}"
+}
+
+# Install Node.js (required for Tailwind CSS in UI)
+install_nodejs() {
+    echo ""
+    echo -e "${CYAN}=== Checking Node.js ===${NC}"
+
+    if command_exists node && command_exists npm; then
+        NODE_VERSION=$(node --version)
+        echo -e "${GREEN}Node.js is already installed: ${NODE_VERSION}${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}Node.js is not installed, installing...${NC}"
+
+    if command_exists apt-get; then
+        # Install Node.js via NodeSource for Ubuntu/Debian
+        curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+    elif command_exists dnf; then
+        sudo dnf install -y nodejs npm
+    elif command_exists yum; then
+        curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash -
+        sudo yum install -y nodejs
+    elif command_exists pacman; then
+        sudo pacman -S --noconfirm nodejs npm
+    else
+        echo -e "${RED}Error: Could not detect package manager. Please install Node.js manually.${NC}"
+        echo "Visit: https://nodejs.org/"
+        return 1
+    fi
+
+    echo -e "${GREEN}Node.js installed successfully: $(node --version)${NC}"
+}
+
+# Install cargo-leptos
+install_cargo_leptos() {
+    echo ""
+    echo -e "${CYAN}=== Checking cargo-leptos ===${NC}"
+
+    if command_exists cargo-leptos; then
+        LEPTOS_VERSION=$(cargo leptos --version 2>&1 | head -n1)
+        echo -e "${GREEN}cargo-leptos is already installed: ${LEPTOS_VERSION}${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}Installing cargo-leptos...${NC}"
+
+    # Source cargo env if needed
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+
+    cargo install cargo-leptos
+
+    echo -e "${GREEN}cargo-leptos installed successfully${NC}"
 }
 
 # Install Firecracker
@@ -295,7 +355,7 @@ build_project() {
         source "$HOME/.cargo/env"
     fi
 
-    echo "Building project..."
+    echo "Building control plane..."
     cargo build --release
 
     echo -e "${GREEN}Build successful!${NC}"
@@ -307,14 +367,57 @@ build_project() {
     read -p "Do you want to install binaries to ${INSTALL_DIR}? [y/N] " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if [ "$EUID" -eq 0 ]; then
-            install -m 0755 target/release/glidex-control-plane "${INSTALL_DIR}/"
-            install -m 0755 target/release/gxctl "${INSTALL_DIR}/"
-        else
-            install -m 0755 target/release/glidex-control-plane "${INSTALL_DIR}/"
-            install -m 0755 target/release/gxctl "${INSTALL_DIR}/"
-        fi
+        install -m 0755 target/release/glidex-control-plane "${INSTALL_DIR}/"
+        install -m 0755 target/release/gxctl "${INSTALL_DIR}/"
         echo -e "${GREEN}Installed binaries to ${INSTALL_DIR}${NC}"
+    fi
+}
+
+# Build the UI
+build_ui() {
+    echo ""
+    echo -e "${CYAN}=== Building Web UI ===${NC}"
+
+    # Make sure we're in the project directory
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    cd "$SCRIPT_DIR"
+
+    if [ ! -d "crates/glidex-ui" ]; then
+        echo -e "${RED}Error: UI directory not found${NC}"
+        return 1
+    fi
+
+    # Source cargo env if needed
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+
+    cd crates/glidex-ui
+
+    # Install npm dependencies for Tailwind
+    echo "Installing npm dependencies..."
+    npm install
+
+    # Build Tailwind CSS
+    echo "Building Tailwind CSS..."
+    npm run css:build
+
+    # Build with cargo-leptos
+    echo "Building UI with cargo-leptos..."
+    cargo leptos build --release
+
+    cd "$SCRIPT_DIR"
+
+    echo -e "${GREEN}UI build successful!${NC}"
+    echo ""
+    echo -e "${CYAN}UI binary location:${NC}"
+    echo "  UI Server: target/release/glidex-ui"
+
+    read -p "Do you want to install the UI binary to ${INSTALL_DIR}? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        install -m 0755 target/release/glidex-ui "${INSTALL_DIR}/"
+        echo -e "${GREEN}Installed UI binary to ${INSTALL_DIR}${NC}"
     fi
 }
 
@@ -354,22 +457,26 @@ print_usage() {
     echo ""
     echo -e "${CYAN}=== Quick Start ===${NC}"
     echo ""
-    echo "1. Start the server:"
+    echo "1. Start the control plane server:"
     echo -e "   ${GREEN}glidex-control-plane${NC}"
     echo ""
-    echo "2. In another terminal, start the CLI:"
+    echo "2. (Optional) Start the web UI in another terminal:"
+    echo -e "   ${GREEN}glidex-ui${NC}"
+    echo "   Then open http://localhost:3000 in your browser"
+    echo ""
+    echo "3. Or use the CLI in another terminal:"
     echo -e "   ${GREEN}gxctl${NC}"
     echo ""
-    echo "3. Create and start a VM:"
+    echo "4. Create and start a VM:"
     echo -e "   ${GREEN}gxctl> create${NC}"
     echo "   Enter VM details (or press Enter for defaults)"
     echo -e "   ${GREEN}gxctl> start <vm-name>${NC}"
     echo ""
-    echo "4. Connect to VM console:"
+    echo "5. Connect to VM console:"
     echo -e "   ${GREEN}gxctl> connect <vm-name>${NC}"
     echo "   (Press Ctrl+] to detach)"
     echo ""
-    echo "5. View console log:"
+    echo "6. View console log:"
     echo -e "   ${GREEN}gxctl> log <vm-name>${NC}"
     echo ""
     echo "For more commands, type 'help' in gxctl"
@@ -383,10 +490,13 @@ main() {
 
     echo ""
     echo -e "${CYAN}This script will install:${NC}"
-    echo "  1. Rust (if not installed)"
-    echo "  2. Firecracker ${FIRECRACKER_VERSION}"
-    echo "  3. Build the control plane"
-    echo "  4. (Optional) Download sample kernel and rootfs"
+    echo "  1. Rust (if not installed) + wasm32 target"
+    echo "  2. Node.js (if not installed, for UI)"
+    echo "  3. cargo-leptos (for UI build)"
+    echo "  4. Firecracker ${FIRECRACKER_VERSION}"
+    echo "  5. Build the control plane"
+    echo "  6. Build the web UI"
+    echo "  7. (Optional) Download sample kernel and rootfs"
     echo ""
 
     read -p "Continue with installation? [Y/n] " -n 1 -r
@@ -397,9 +507,12 @@ main() {
     fi
 
     install_rust
+    install_nodejs
+    install_cargo_leptos
     install_firecracker
     setup_kvm
     build_project
+    build_ui
     download_samples
     print_usage
 
