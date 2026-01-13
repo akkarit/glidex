@@ -4,10 +4,9 @@ use crate::api;
 
 #[component]
 pub fn Header() -> impl IntoView {
-    let health_status = Resource::new(
-        || (),
-        |_| async move { api::health_check().await.is_ok() },
-    );
+    let health_status = LocalResource::new(move || async move {
+        api::health_check().await.is_ok()
+    });
 
     // Set up polling for health check every 5 seconds
     #[cfg(feature = "hydrate")]
@@ -45,7 +44,7 @@ pub fn Header() -> impl IntoView {
                         }>
                             {move || {
                                 health_status.get().map(|is_healthy| {
-                                    if is_healthy {
+                                    if *is_healthy {
                                         view! {
                                             <span class="flex items-center">
                                                 <span class="w-2 h-2 bg-green-500 rounded-full"></span>

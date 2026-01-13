@@ -13,16 +13,16 @@ pub fn VmDetail() -> impl IntoView {
     let vm_id = move || params.read().get("id").unwrap_or_default();
 
     // Resource for fetching VM
-    let vm_resource = Resource::new(
-        move || vm_id(),
-        |id| async move {
+    let vm_resource = LocalResource::new(move || {
+        let id = vm_id();
+        async move {
             if id.is_empty() {
                 Err("No VM ID provided".to_string())
             } else {
                 api::get_vm(&id).await
             }
-        },
-    );
+        }
+    });
 
     #[allow(unused)]
     let refetch = move || {
@@ -47,7 +47,8 @@ pub fn VmDetail() -> impl IntoView {
                             Ok(_) => {
                                 // Redirect to dashboard after deletion
                                 if let Some(window) = web_sys::window() {
-                                    let _ = window.location().set_href("/");
+                                    let location = window.location();
+                                    let _ = location.set_href("/");
                                 }
                                 return;
                             }
@@ -100,7 +101,7 @@ pub fn VmDetail() -> impl IntoView {
             <Suspense fallback=move || view! { <Loading/> }>
                 {move || {
                     vm_resource.get().map(|result| {
-                        match result {
+                        match (*result).clone() {
                             Ok(vm) => {
                                 let state_class = format!("px-3 py-1 text-sm font-medium text-white rounded-full {}", vm.state.css_class());
                                 let state_text = vm.state.display();
@@ -164,7 +165,8 @@ pub fn VmDetail() -> impl IntoView {
                                     </div>
                                 }.into_any()
                             }
-                            Err(e) => view! {
+                            Err(e) => {
+                                view! {
                                 <div class="text-center py-12 mt-4">
                                     <p class="text-red-500 text-lg">"Error: " {e}</p>
                                     <a
@@ -174,7 +176,8 @@ pub fn VmDetail() -> impl IntoView {
                                         "Back to Dashboard"
                                     </a>
                                 </div>
-                            }.into_any(),
+                            }.into_any()
+                            }
                         }
                     })
                 }}

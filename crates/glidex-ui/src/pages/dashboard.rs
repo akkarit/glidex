@@ -11,7 +11,7 @@ pub fn Dashboard() -> impl IntoView {
     let (_action_loading, set_action_loading) = signal(false);
 
     // Resource for fetching VMs
-    let vms_resource = Resource::new(|| (), |_| async move { api::list_vms().await });
+    let vms_resource = LocalResource::new(move || async move { api::list_vms().await });
 
     // Refetch function
     let refetch = move || {
@@ -123,7 +123,7 @@ pub fn Dashboard() -> impl IntoView {
             }>
                 {move || {
                     vms_resource.get().map(|result| {
-                        match result {
+                        match (*result).clone() {
                             Ok(vms) => {
                                 if vms.is_empty() {
                                     view! {
@@ -153,7 +153,8 @@ pub fn Dashboard() -> impl IntoView {
                                     }.into_any()
                                 }
                             }
-                            Err(e) => view! {
+                            Err(e) => {
+                                view! {
                                 <div class="text-center py-12">
                                     <p class="text-red-500">"Error loading VMs: " {e}</p>
                                     <button
@@ -163,7 +164,8 @@ pub fn Dashboard() -> impl IntoView {
                                         "Retry"
                                     </button>
                                 </div>
-                            }.into_any(),
+                            }.into_any()
+                            }
                         }
                     })
                 }}
