@@ -14,6 +14,7 @@ A Rust-based control plane for managing [Firecracker](https://firecracker-microv
 ## Features
 
 - **REST API** for VM lifecycle management (create, start, stop, pause, delete)
+- **Web UI** - Modern Leptos-based web interface for VM management
 - **Interactive CLI** (`gxctl`) with command history and tab completion
 - **Interactive console** - connect to VM serial console with full I/O support
 - **Console logging** - persistent logs of all VM console output
@@ -57,18 +58,27 @@ cargo build --release
 1. **Start the control plane server:**
 
 ```bash
-glidex-control-plane
+cargo run --bin glidex-control-plane
 ```
 
 The server listens on `http://localhost:8080` by default.
 
-2. **In another terminal, start the CLI:**
+2. **Option A: Start the Web UI:**
 
 ```bash
-gxctl
+cd crates/glidex-ui
+cargo leptos watch
 ```
 
-3. **Create and start a VM:**
+Open http://localhost:3000 in your browser.
+
+3. **Option B: Start the CLI:**
+
+```bash
+cargo run --bin gxctl
+```
+
+4. **Create and start a VM (via CLI):**
 
 ```
 gxctl> create
@@ -167,11 +177,17 @@ curl http://localhost:8080/vms
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      gxctl (CLI)                            │
-│  - Interactive shell                                        │
-│  - Connects to REST API                                     │
-│  - Connects to console Unix socket                          │
+│                   glidex-ui (Web UI)                        │
+│  - Leptos SSR + Hydration                                   │
+│  - Dashboard, VM management                                 │
+│  - Real-time status updates                                 │
 └─────────────────┬───────────────────────────────────────────┘
+                  │ HTTP (REST API)
+┌─────────────────┼───────────────────────────────────────────┐
+│                 │        gxctl (CLI)                        │
+│                 │  - Interactive shell                      │
+│                 │  - Connects to console Unix socket        │
+└─────────────────┼───────────────────────────────────────────┘
                   │ HTTP / Unix Socket
 ┌─────────────────▼───────────────────────────────────────────┐
 │              glidex-control-plane (Server)                  │
@@ -179,6 +195,7 @@ curl http://localhost:8080/vms
 │  - VM state management                                      │
 │  - Console proxy (PTY ↔ Unix socket)                        │
 │  - Console logging                                          │
+│  - Persistence (ReDB)                                       │
 └─────────────────┬───────────────────────────────────────────┘
                   │ Unix Socket (Firecracker API)
 ┌─────────────────▼───────────────────────────────────────────┐
@@ -221,20 +238,31 @@ sudo usermod -aG kvm $USER
 
 ```
 glidex/
-├── src/
-│   ├── main.rs          # Server entry point
-│   ├── lib.rs           # Library exports
-│   ├── api.rs           # REST API routes and handlers
-│   ├── models.rs        # Data structures (VM, VmConfig, etc.)
-│   ├── state.rs         # VM state management
-│   ├── firecracker.rs   # Firecracker API client & process management
-│   └── bin/
-│       └── gxctl.rs     # CLI client
-├── tests/
-│   └── api_tests.rs     # API integration tests
-├── install.sh           # Installation script
-├── Cargo.toml           # Rust dependencies
-└── README.md
+├── Cargo.toml                    # Workspace root
+├── install.sh                    # Installation script
+├── README.md
+└── crates/
+    ├── glidex-control-plane/     # Control plane server
+    │   ├── src/
+    │   │   ├── main.rs           # Server entry point
+    │   │   ├── api.rs            # REST API routes and handlers
+    │   │   ├── models.rs         # Data structures (VM, VmConfig, etc.)
+    │   │   ├── state.rs          # VM state management
+    │   │   ├── firecracker.rs    # Firecracker API client
+    │   │   ├── persistence.rs    # ReDB-based persistence
+    │   │   └── bin/
+    │   │       └── gxctl.rs      # CLI client
+    │   └── tests/
+    │       └── api_tests.rs      # API integration tests
+    └── glidex-ui/                # Web UI (Leptos)
+        ├── src/
+        │   ├── main.rs           # SSR server
+        │   ├── app.rs            # Root component
+        │   ├── api/              # API client
+        │   ├── components/       # UI components
+        │   └── pages/            # Page views
+        ├── style/                # Tailwind CSS
+        └── README.md             # UI documentation
 ```
 
 ## Development
@@ -287,4 +315,6 @@ MIT
 
 - [Firecracker](https://firecracker-microvm.github.io/) - The microVM hypervisor
 - [Axum](https://github.com/tokio-rs/axum) - Web framework
+- [Leptos](https://leptos.dev/) - Rust web framework for the UI
 - [Tokio](https://tokio.rs/) - Async runtime
+- [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework

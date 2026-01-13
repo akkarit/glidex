@@ -1,0 +1,11 @@
+{
+  "name": "glidex-ui",
+  "private": true,
+  "scripts": {
+    "css:build": "tailwindcss -i ./style/main.css -o ./style/output.css --minify",
+    "css:watch": "tailwindcss -i ./style/main.css -o ./style/output.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4"
+  }
+}
