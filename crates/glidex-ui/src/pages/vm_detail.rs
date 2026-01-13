@@ -101,7 +101,7 @@ pub fn VmDetail() -> impl IntoView {
             <Suspense fallback=move || view! { <Loading/> }>
                 {move || {
                     vm_resource.get().map(|result| {
-                        match (*result).clone() {
+                        match result {
                             Ok(vm) => {
                                 let state_class = format!("px-3 py-1 text-sm font-medium text-white rounded-full {}", vm.state.css_class());
                                 let state_text = vm.state.display();

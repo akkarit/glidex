@@ -123,7 +123,7 @@ pub fn Dashboard() -> impl IntoView {
             }>
                 {move || {
                     vms_resource.get().map(|result| {
-                        match (*result).clone() {
+                        match result {
                             Ok(vms) => {
                                 if vms.is_empty() {
                                     view! {

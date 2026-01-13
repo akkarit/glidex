@@ -44,7 +44,7 @@ pub fn Header() -> impl IntoView {
                         }>
                             {move || {
                                 health_status.get().map(|is_healthy| {
-                                    if *is_healthy {
+                                    if is_healthy {
                                         view! {
                                             <span class="flex items-center">
                                                 <span class="w-2 h-2 bg-green-500 rounded-full"></span>
