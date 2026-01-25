@@ -1,5 +1,5 @@
 pub mod api;
-pub mod firecracker;
+pub mod hypervisor;
 pub mod models;
 pub mod persistence;
 pub mod state;

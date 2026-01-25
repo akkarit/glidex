@@ -1,6 +1,6 @@
 # Glidex
 
-A Rust-based control plane for managing [Firecracker](https://firecracker-microvm.github.io/) microVMs.
+A Rust-based control plane for managing microVMs with support for multiple hypervisors including [Firecracker](https://firecracker-microvm.github.io/) and [Cloud-Hypervisor](https://www.cloudhypervisor.org/).
 
 ```
    _____ _ _     _
@@ -13,6 +13,7 @@ A Rust-based control plane for managing [Firecracker](https://firecracker-microv
 
 ## Features
 
+- **Multi-hypervisor support** - Control both Firecracker and Cloud-Hypervisor VMs through a unified interface
 - **REST API** for VM lifecycle management (create, start, stop, pause, delete)
 - **Web UI** - Modern Leptos-based web interface for VM management
 - **Interactive CLI** (`gxctl`) with command history and tab completion
@@ -38,6 +39,14 @@ The installer will:
 2. Download and install Firecracker v1.14.0
 3. Build the Glidex binaries
 4. Optionally download sample kernel and rootfs images to `~/.glidex/`
+
+For Cloud-Hypervisor support, install it separately:
+```bash
+# Download Cloud-Hypervisor (check https://github.com/cloud-hypervisor/cloud-hypervisor/releases for latest)
+wget https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v44.0/cloud-hypervisor-static
+chmod +x cloud-hypervisor-static
+sudo mv cloud-hypervisor-static /usr/local/bin/cloud-hypervisor
+```
 
 ### Manual Installation
 
@@ -88,6 +97,7 @@ Memory (MiB) [512]: 1024
 Kernel image path [~/.glidex/vmlinux.bin]:
 Root filesystem path [~/.glidex/rootfs.ext4]:
 Kernel arguments (optional):
+Hypervisor [firecracker/cloudhypervisor] (default: cloudhypervisor):
 
 gxctl> start my-vm
 ```
@@ -148,9 +158,14 @@ gxctl> log my-vm
   "mem_size_mib": 1024,
   "kernel_image_path": "/path/to/vmlinux.bin",
   "rootfs_path": "/path/to/rootfs.ext4",
-  "kernel_args": "console=ttyS0 reboot=k panic=1 pci=off"
+  "kernel_args": "console=ttyS0 reboot=k panic=1 pci=off",
+  "hypervisor": "cloudhypervisor"
 }
 ```
+
+The `hypervisor` field is optional and defaults to `"cloudhypervisor"`. Supported values:
+- `"cloudhypervisor"` - Use Cloud-Hypervisor (default)
+- `"firecracker"` - Use Firecracker hypervisor
 
 ### Example: Create and Start a VM with curl
 
@@ -193,34 +208,58 @@ curl http://localhost:8080/vms
 │              glidex-control-plane (Server)                  │
 │  - REST API (Axum)                                          │
 │  - VM state management                                      │
+│  - Hypervisor abstraction layer                             │
 │  - Console proxy (PTY ↔ Unix socket)                        │
 │  - Console logging                                          │
 │  - Persistence (ReDB)                                       │
 └─────────────────┬───────────────────────────────────────────┘
-                  │ Unix Socket (Firecracker API)
-┌─────────────────▼───────────────────────────────────────────┐
-│                    Firecracker                              │
-│  - microVM hypervisor                                       │
-│  - KVM-based virtualization                                 │
-└─────────────────────────────────────────────────────────────┘
+                  │ Unix Socket (Hypervisor API)
+        ┌─────────┴─────────┐
+        ▼                   ▼
+┌───────────────┐   ┌───────────────────┐
+│  Firecracker  │   │  Cloud-Hypervisor │
+│  - microVM    │   │  - microVM        │
+│  - KVM-based  │   │  - KVM-based      │
+└───────────────┘   └───────────────────┘
 ```
+
+### Hypervisor Abstraction
+
+The control plane uses a trait-based abstraction to support multiple hypervisors:
+
+```
+hypervisor/
+├── mod.rs              # Hypervisor and HypervisorProcess traits
+├── firecracker.rs      # Firecracker implementation
+└── cloud_hypervisor.rs # Cloud-Hypervisor implementation
+```
+
+Both hypervisors implement the same interface:
+- `configure()` - Configure VM with CPU, memory, kernel, and disk
+- `start()` - Boot the VM
+- `pause()` - Pause the VM
+- `resume()` - Resume a paused VM
+- `kill()` - Terminate the VM process
 
 ### Console Architecture
 
-For each running VM:
+For each running VM (Firecracker):
 - A PTY (pseudo-terminal) pair is created
-- Firecracker's stdin/stdout/stderr connect to the PTY slave
+- The hypervisor's stdin/stdout/stderr connect to the PTY slave
 - A background thread reads from the PTY master and:
-  - Writes all output to a log file (`/tmp/firecracker-{id}.log`)
-  - Broadcasts to connected clients via Unix socket (`/tmp/firecracker-{id}.console.sock`)
+  - Writes all output to a log file (`/tmp/{hypervisor}-{id}.log`)
+  - Broadcasts to connected clients via Unix socket (`/tmp/{hypervisor}-{id}.console.sock`)
 - Multiple clients can connect simultaneously
+
+For Cloud-Hypervisor, console output is captured via the `--console file` option.
 
 ## Requirements
 
-- **Linux** (Firecracker only supports Linux)
+- **Linux** (both hypervisors only support Linux)
 - **KVM** enabled (`/dev/kvm` accessible)
 - **Rust 1.85+** (for building)
-- **Firecracker 1.14.0+**
+- **Firecracker 1.14.0+** (for Firecracker VMs)
+- **Cloud-Hypervisor 44.0+** (optional, for Cloud-Hypervisor VMs)
 
 ### Enabling KVM
 
@@ -248,8 +287,11 @@ glidex/
     │   │   ├── api.rs            # REST API routes and handlers
     │   │   ├── models.rs         # Data structures (VM, VmConfig, etc.)
     │   │   ├── state.rs          # VM state management
-    │   │   ├── firecracker.rs    # Firecracker API client
     │   │   ├── persistence.rs    # ReDB-based persistence
+    │   │   ├── hypervisor/       # Hypervisor abstraction layer
+    │   │   │   ├── mod.rs        # Traits and HypervisorType enum
+    │   │   │   ├── firecracker.rs    # Firecracker backend
+    │   │   │   └── cloud_hypervisor.rs # Cloud-Hypervisor backend
     │   │   └── bin/
     │   │       └── gxctl.rs      # CLI client
     │   └── tests/
@@ -313,7 +355,8 @@ MIT
 
 ## Acknowledgments
 
-- [Firecracker](https://firecracker-microvm.github.io/) - The microVM hypervisor
+- [Firecracker](https://firecracker-microvm.github.io/) - microVM hypervisor
+- [Cloud-Hypervisor](https://www.cloudhypervisor.org/) - microVM hypervisor
 - [Axum](https://github.com/tokio-rs/axum) - Web framework
 - [Leptos](https://leptos.dev/) - Rust web framework for the UI
 - [Tokio](https://tokio.rs/) - Async runtime

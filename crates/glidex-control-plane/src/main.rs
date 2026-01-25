@@ -1,5 +1,5 @@
 mod api;
-mod firecracker;
+mod hypervisor;
 mod models;
 mod persistence;
 mod state;
@@ -161,7 +161,7 @@ async fn shutdown_signal(vm_manager: Arc<VmManager>) {
     println!();
     tracing::info!("Shutdown signal received, stopping VMs...");
 
-    // Stop all running Firecracker processes
+    // Stop all running hypervisor processes
     vm_manager.shutdown().await;
 
     tracing::info!("Shutdown complete");

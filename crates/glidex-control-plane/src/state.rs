@@ -1,4 +1,4 @@
-use crate::firecracker::{FirecrackerError, FirecrackerProcess};
+use crate::hypervisor::{create_backend, Hypervisor, HypervisorError, HypervisorProcess, HypervisorType};
 use crate::models::{Vm, VmConfig, VmState};
 use crate::persistence::{PersistenceError, VmStore};
 use std::collections::HashMap;
@@ -11,8 +11,9 @@ pub enum VmManagerError {
     VmNotFound(String),
     VmAlreadyExists(String),
     InvalidState { current: VmState, operation: String },
-    FirecrackerError(FirecrackerError),
+    HypervisorError(HypervisorError),
     PersistenceError(String),
+    HypervisorNotAvailable(HypervisorType),
 }
 
 impl std::fmt::Display for VmManagerError {
@@ -23,15 +24,18 @@ impl std::fmt::Display for VmManagerError {
             VmManagerError::InvalidState { current, operation } => {
                 write!(f, "Invalid state {:?} for operation: {}", current, operation)
             }
-            VmManagerError::FirecrackerError(e) => write!(f, "Firecracker error: {}", e),
+            VmManagerError::HypervisorError(e) => write!(f, "Hypervisor error: {}", e),
             VmManagerError::PersistenceError(e) => write!(f, "Persistence error: {}", e),
+            VmManagerError::HypervisorNotAvailable(h) => {
+                write!(f, "Hypervisor not available: {:?}", h)
+            }
         }
     }
 }
 
-impl From<FirecrackerError> for VmManagerError {
-    fn from(e: FirecrackerError) -> Self {
-        VmManagerError::FirecrackerError(e)
+impl From<HypervisorError> for VmManagerError {
+    fn from(e: HypervisorError) -> Self {
+        VmManagerError::HypervisorError(e)
     }
 }
 
@@ -43,12 +47,13 @@ impl From<PersistenceError> for VmManagerError {
 
 struct VmEntry {
     vm: Vm,
-    process: Option<FirecrackerProcess>,
+    process: Option<Box<dyn HypervisorProcess>>,
 }
 
 pub struct VmManager {
     vms: RwLock<HashMap<String, VmEntry>>,
     store: VmStore,
+    backends: HashMap<HypervisorType, Box<dyn Hypervisor>>,
 }
 
 impl VmManager {
@@ -60,10 +65,25 @@ impl VmManager {
     /// Create a new VmManager with persistence at a custom path
     pub fn with_db_path(db_path: PathBuf) -> Result<Arc<Self>, VmManagerError> {
         let store = VmStore::open(&db_path)?;
+
+        // Initialize hypervisor backends
+        let mut backends: HashMap<HypervisorType, Box<dyn Hypervisor>> = HashMap::new();
+        backends.insert(HypervisorType::Firecracker, create_backend(HypervisorType::Firecracker));
+        backends.insert(HypervisorType::CloudHypervisor, create_backend(HypervisorType::CloudHypervisor));
+
         Ok(Arc::new(Self {
             vms: RwLock::new(HashMap::new()),
             store,
+            backends,
         }))
+    }
+
+    /// Get the backend for a hypervisor type
+    fn get_backend(&self, hypervisor: HypervisorType) -> Result<&dyn Hypervisor, VmManagerError> {
+        self.backends
+            .get(&hypervisor)
+            .map(|b| b.as_ref())
+            .ok_or(VmManagerError::HypervisorNotAvailable(hypervisor))
     }
 
     /// Get the default database path (~/.glidex/glidex.db)
@@ -105,8 +125,8 @@ impl VmManager {
     fn reconcile_vm_state(&self, vm: &Vm) -> VmState {
         match vm.state {
             VmState::Running | VmState::Paused => {
-                // Check if the Firecracker process is still alive
-                if self.is_firecracker_alive(&vm.socket_path) {
+                // Check if the hypervisor process is still alive
+                if self.is_hypervisor_alive(&vm.socket_path) {
                     // Process exists but we lost the handle - clean up and mark as stopped
                     self.cleanup_orphaned_vm(vm);
                 }
@@ -116,8 +136,8 @@ impl VmManager {
         }
     }
 
-    /// Check if a Firecracker process is still alive by probing its socket
-    fn is_firecracker_alive(&self, socket_path: &str) -> bool {
+    /// Check if a hypervisor process is still alive by probing its socket
+    fn is_hypervisor_alive(&self, socket_path: &str) -> bool {
         std::path::Path::new(socket_path).exists()
     }
 
@@ -169,21 +189,24 @@ impl VmManager {
 
         match entry.vm.state {
             VmState::Created | VmState::Stopped => {
-                // Spawn Firecracker process with console socket and log file
-                let mut process = FirecrackerProcess::spawn(
+                // Get the appropriate backend for this VM's hypervisor
+                let backend = self.get_backend(entry.vm.hypervisor)?;
+
+                // Spawn hypervisor process with console socket and log file
+                let process = backend.spawn(
                     &entry.vm.socket_path,
                     &entry.vm.console_socket_path,
                     &entry.vm.log_path,
                 )?;
 
                 // Configure the VM, cleanup process on failure
-                if let Err(e) = crate::firecracker::configure_vm(&entry.vm) {
+                if let Err(e) = process.configure(&entry.vm.config) {
                     let _ = process.kill();
                     return Err(e.into());
                 }
 
                 // Start the VM, cleanup process on failure
-                if let Err(e) = crate::firecracker::start_vm(&entry.vm) {
+                if let Err(e) = process.start() {
                     let _ = process.kill();
                     return Err(e.into());
                 }
@@ -202,12 +225,21 @@ impl VmManager {
             }
             VmState::Paused => {
                 // Resume paused VM
-                crate::firecracker::resume_vm(&entry.vm)?;
+                if let Some(ref process) = entry.process {
+                    process.resume()?;
+                } else {
+                    return Err(VmManagerError::InvalidState {
+                        current: VmState::Paused,
+                        operation: "start (no process handle)".to_string(),
+                    });
+                }
 
                 // Persist state change BEFORE updating in-memory state
                 // If persist fails, pause again to maintain consistency
                 if let Err(e) = self.store.update_state(vm_id, VmState::Running) {
-                    let _ = crate::firecracker::pause_vm(&entry.vm);
+                    if let Some(ref process) = entry.process {
+                        let _ = process.pause();
+                    }
                     return Err(e.into());
                 }
 
@@ -231,8 +263,8 @@ impl VmManager {
 
         match entry.vm.state {
             VmState::Running | VmState::Paused => {
-                // Kill the Firecracker process (cannot be undone)
-                if let Some(ref mut process) = entry.process {
+                // Kill the hypervisor process (cannot be undone)
+                if let Some(ref process) = entry.process {
                     let _ = process.kill();
                 }
                 entry.process = None;
@@ -269,12 +301,21 @@ impl VmManager {
             });
         }
 
-        crate::firecracker::pause_vm(&entry.vm)?;
+        if let Some(ref process) = entry.process {
+            process.pause()?;
+        } else {
+            return Err(VmManagerError::InvalidState {
+                current: entry.vm.state.clone(),
+                operation: "pause (no process handle)".to_string(),
+            });
+        }
 
         // Persist state change BEFORE updating in-memory state
         // If persist fails, resume the VM to maintain consistency
         if let Err(e) = self.store.update_state(vm_id, VmState::Paused) {
-            let _ = crate::firecracker::resume_vm(&entry.vm);
+            if let Some(ref process) = entry.process {
+                let _ = process.resume();
+            }
             return Err(e.into());
         }
 
@@ -303,7 +344,7 @@ impl VmManager {
             .ok_or_else(|| VmManagerError::VmNotFound(vm_id.to_string()))?;
 
         // Stop the VM if running
-        if let Some(ref mut process) = entry.process {
+        if let Some(ref process) = entry.process {
             let _ = process.kill();
         }
 
@@ -320,7 +361,7 @@ impl VmManager {
         let mut stopped_count = 0;
 
         for (vm_id, entry) in vms.iter_mut() {
-            if let Some(ref mut process) = entry.process {
+            if let Some(ref process) = entry.process {
                 tracing::info!("Stopping VM {} ({})...", entry.vm.name, vm_id);
                 let _ = process.kill();
                 stopped_count += 1;

@@ -1,14 +1,15 @@
 # GlideX Web UI
 
-A Leptos-based web interface for managing Firecracker VMs through the GlideX control plane API.
+A Leptos-based web interface for managing microVMs through the GlideX control plane API. Supports both Firecracker and Cloud-Hypervisor backends.
 
 ## Features
 
 - **Dashboard**: View all VMs in a responsive grid layout
+- **Multi-Hypervisor**: Create VMs using Firecracker or Cloud-Hypervisor
 - **VM Management**: Create, start, stop, pause, and delete VMs
 - **Real-time Status**: Color-coded state indicators (green=running, red=stopped, yellow=paused, blue=created)
 - **Health Monitoring**: API health status indicator in the header
-- **VM Details**: Detailed view with console socket and log paths
+- **VM Details**: Detailed view with hypervisor type, console socket, and log paths
 
 ## Prerequisites
 

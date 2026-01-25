@@ -30,6 +30,7 @@ struct VmResponse {
     state: String,
     vcpu_count: u8,
     mem_size_mib: u32,
+    hypervisor: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,6 +42,8 @@ struct CreateVmRequest {
     rootfs_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     kernel_args: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hypervisor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -357,6 +360,22 @@ async fn handle_create(client: &CliClient) {
 
     let kernel_args = prompt_optional("Kernel arguments (optional, default: console=ttyS0 reboot=k panic=1 pci=off): ");
 
+    let hypervisor = match prompt("Hypervisor [firecracker/cloudhypervisor] (default: cloudhypervisor): ")
+        .to_lowercase()
+        .as_str()
+    {
+        "firecracker" | "fc" => Some("firecracker".to_string()),
+        "" | "cloudhypervisor" | "cloud-hypervisor" | "ch" => Some("cloudhypervisor".to_string()),
+        other => {
+            println!(
+                "{} Unknown hypervisor '{}', using cloudhypervisor",
+                "Warning:".yellow(),
+                other
+            );
+            Some("cloudhypervisor".to_string())
+        }
+    };
+
     let request = CreateVmRequest {
         name,
         vcpu_count,
@@ -364,6 +383,7 @@ async fn handle_create(client: &CliClient) {
         kernel_image_path,
         rootfs_path,
         kernel_args,
+        hypervisor,
     };
 
     match client.create_vm(request).await {
@@ -372,6 +392,7 @@ async fn handle_create(client: &CliClient) {
             println!("  ID: {}", vm.id.yellow());
             println!("  Name: {}", vm.name);
             println!("  State: {}", vm.state);
+            println!("  Hypervisor: {}", vm.hypervisor);
         }
         Err(e) => println!("{} {}", "Error:".red(), e),
     }
@@ -625,11 +646,12 @@ async fn handle_command(line: &str, client: &CliClient) -> bool {
                 Ok(vm) => {
                     println!("{}", "VM Details".bold());
                     println!("{}", "-".repeat(40));
-                    println!("  ID:      {}", vm.id.yellow());
-                    println!("  Name:    {}", vm.name);
-                    println!("  State:   {}", format_state(&vm.state));
-                    println!("  vCPUs:   {}", vm.vcpu_count);
-                    println!("  Memory:  {} MiB", vm.mem_size_mib);
+                    println!("  ID:         {}", vm.id.yellow());
+                    println!("  Name:       {}", vm.name);
+                    println!("  State:      {}", format_state(&vm.state));
+                    println!("  Hypervisor: {}", vm.hypervisor);
+                    println!("  vCPUs:      {}", vm.vcpu_count);
+                    println!("  Memory:     {} MiB", vm.mem_size_mib);
                 }
                 Err(e) => println!("{} {}", "Error:".red(), e),
             }

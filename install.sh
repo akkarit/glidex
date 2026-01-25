@@ -9,6 +9,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Versions
+CLOUD_HYPERVISOR_VERSION="v50.0"
 FIRECRACKER_VERSION="v1.14.0"
 RUST_MIN_VERSION="1.85.0"
 
@@ -42,7 +43,7 @@ detect_platform() {
     esac
 
     if [ "$OS" != "linux" ]; then
-        echo -e "${RED}Error: Firecracker only supports Linux${NC}"
+        echo -e "${RED}Error: Cloud-Hypervisor and Firecracker only support Linux${NC}"
         exit 1
     fi
 
@@ -160,20 +161,68 @@ install_cargo_leptos() {
     echo -e "${GREEN}cargo-leptos installed successfully${NC}"
 }
 
-# Install Firecracker
-install_firecracker() {
+# Install Cloud-Hypervisor (default hypervisor)
+install_cloud_hypervisor() {
     echo ""
-    echo -e "${CYAN}=== Checking Firecracker ===${NC}"
+    echo -e "${CYAN}=== Checking Cloud-Hypervisor ===${NC}"
 
-    if command_exists firecracker; then
-        FC_VERSION=$(firecracker --version 2>&1 | head -n1)
-        echo -e "${GREEN}Firecracker is already installed: ${FC_VERSION}${NC}"
+    if command_exists cloud-hypervisor; then
+        CH_VERSION=$(cloud-hypervisor --version 2>&1 | head -n1)
+        echo -e "${GREEN}Cloud-Hypervisor is already installed: ${CH_VERSION}${NC}"
 
-        read -p "Do you want to reinstall/update Firecracker? [y/N] " -n 1 -r
+        read -p "Do you want to reinstall/update Cloud-Hypervisor? [y/N] " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             return 0
         fi
+    fi
+
+    echo -e "${YELLOW}Installing Cloud-Hypervisor ${CLOUD_HYPERVISOR_VERSION}...${NC}"
+
+    # Create temp directory
+    TEMP_DIR=$(mktemp -d)
+    cd "$TEMP_DIR"
+
+    # Determine binary name based on architecture
+    if [ "$ARCH" = "x86_64" ]; then
+        CH_BINARY="cloud-hypervisor-static"
+    else
+        CH_BINARY="cloud-hypervisor-static-aarch64"
+    fi
+
+    # Download Cloud-Hypervisor release
+    RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${CLOUD_HYPERVISOR_VERSION}/${CH_BINARY}"
+
+    echo "Downloading from: ${RELEASE_URL}"
+    curl -sSL "$RELEASE_URL" -o cloud-hypervisor
+
+    # Install binary
+    chmod +x cloud-hypervisor
+    sudo install -o root -g root -m 0755 cloud-hypervisor "${INSTALL_DIR}/cloud-hypervisor"
+
+    # Cleanup
+    cd - > /dev/null
+    rm -rf "$TEMP_DIR"
+
+    echo -e "${GREEN}Cloud-Hypervisor installed successfully: $(cloud-hypervisor --version 2>&1 | head -n1)${NC}"
+}
+
+# Install Firecracker (optional secondary hypervisor)
+install_firecracker() {
+    echo ""
+    echo -e "${CYAN}=== Firecracker (Optional) ===${NC}"
+
+    if command_exists firecracker; then
+        FC_VERSION=$(firecracker --version 2>&1 | head -n1)
+        echo -e "${GREEN}Firecracker is already installed: ${FC_VERSION}${NC}"
+        return 0
+    fi
+
+    read -p "Do you want to install Firecracker as an additional hypervisor? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}Skipping Firecracker installation${NC}"
+        return 0
     fi
 
     echo -e "${YELLOW}Installing Firecracker ${FIRECRACKER_VERSION}...${NC}"
@@ -213,7 +262,7 @@ install_firecracker() {
     fi
 
     # Cleanup
-    cd -
+    cd - > /dev/null
     rm -rf "$TEMP_DIR"
 
     echo -e "${GREEN}Firecracker installed successfully: $(firecracker --version 2>&1 | head -n1)${NC}"
@@ -339,7 +388,7 @@ download_samples() {
 # Build the project
 build_project() {
     echo ""
-    echo -e "${CYAN}=== Building Firecracker Control Plane ===${NC}"
+    echo -e "${CYAN}=== Building Glidex Control Plane ===${NC}"
 
     # Make sure we're in the project directory
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -493,10 +542,11 @@ main() {
     echo "  1. Rust (if not installed) + wasm32 target"
     echo "  2. Node.js (if not installed, for UI)"
     echo "  3. cargo-leptos (for UI build)"
-    echo "  4. Firecracker ${FIRECRACKER_VERSION}"
-    echo "  5. Build the control plane"
-    echo "  6. Build the web UI"
-    echo "  7. (Optional) Download sample kernel and rootfs"
+    echo "  4. Cloud-Hypervisor ${CLOUD_HYPERVISOR_VERSION} (default hypervisor)"
+    echo "  5. (Optional) Firecracker ${FIRECRACKER_VERSION}"
+    echo "  6. Build the control plane"
+    echo "  7. Build the web UI"
+    echo "  8. (Optional) Download sample kernel and rootfs"
     echo ""
 
     read -p "Continue with installation? [Y/n] " -n 1 -r
@@ -509,6 +559,7 @@ main() {
     install_rust
     install_nodejs
     install_cargo_leptos
+    install_cloud_hypervisor
     install_firecracker
     setup_kvm
     build_project

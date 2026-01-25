@@ -140,13 +140,17 @@ fn error_to_response(error: VmManagerError) -> (StatusCode, Json<ApiError>) {
             StatusCode::BAD_REQUEST,
             Json(ApiError::new("invalid_state", error.to_string())),
         ),
-        VmManagerError::FirecrackerError(_) => (
+        VmManagerError::HypervisorError(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new("firecracker_error", error.to_string())),
+            Json(ApiError::new("hypervisor_error", error.to_string())),
         ),
         VmManagerError::PersistenceError(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiError::new("persistence_error", error.to_string())),
+        ),
+        VmManagerError::HypervisorNotAvailable(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiError::new("hypervisor_unavailable", error.to_string())),
         ),
     }
 }
