@@ -22,9 +22,6 @@ pub struct VmConfig {
     pub hypervisor: HypervisorType,
 }
 
-/// Default kernel arguments for Firecracker VMs
-pub const DEFAULT_KERNEL_ARGS: &str = "console=ttyS0 reboot=k panic=1 pci=off";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vm {
     pub id: String,
@@ -73,13 +70,16 @@ pub struct CreateVmRequest {
 
 impl From<CreateVmRequest> for VmConfig {
     fn from(req: CreateVmRequest) -> Self {
+        let hypervisor = req.hypervisor.unwrap_or_default();
         VmConfig {
             vcpu_count: req.vcpu_count,
             mem_size_mib: req.mem_size_mib,
             kernel_image_path: req.kernel_image_path,
             rootfs_path: req.rootfs_path,
-            kernel_args: req.kernel_args.unwrap_or_else(|| DEFAULT_KERNEL_ARGS.to_string()),
-            hypervisor: req.hypervisor.unwrap_or_default(),
+            kernel_args: req
+                .kernel_args
+                .unwrap_or_else(|| hypervisor.default_kernel_args().to_string()),
+            hypervisor,
         }
     }
 }

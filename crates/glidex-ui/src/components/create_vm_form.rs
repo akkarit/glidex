@@ -15,7 +15,7 @@ pub fn CreateVmForm(
     let (kernel_args, set_kernel_args) = signal(String::new());
     let (submitting, set_submitting) = signal(false);
 
-    let default_kernel = "~/.glidex/vmlinux.bin".to_string();
+    let default_kernel = "~/.glidex/vmlinux".to_string();
     let default_rootfs = "~/.glidex/rootfs.ext4".to_string();
 
     let handle_submit = move |ev: leptos::ev::SubmitEvent| {
@@ -25,7 +25,7 @@ pub fn CreateVmForm(
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
 
         let kernel = if kernel_path.get().is_empty() {
-            format!("{}/.glidex/vmlinux.bin", home)
+            format!("{}/.glidex/vmlinux", home)
         } else {
             kernel_path.get()
         };
@@ -128,7 +128,7 @@ pub fn CreateVmForm(
                 <input
                     type="text"
                     class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent"
-                    placeholder="console=ttyS0 reboot=k panic=1 pci=off"
+                    placeholder="root=/dev/vda1 reboot=k panic=1"
                     prop:value=move || kernel_args.get()
                     on:input=move |ev| set_kernel_args.set(event_target_value(&ev))
                 />

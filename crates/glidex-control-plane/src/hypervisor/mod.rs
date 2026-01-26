@@ -31,6 +31,14 @@ impl HypervisorType {
             HypervisorType::CloudHypervisor => "cloud-hypervisor",
         }
     }
+
+    /// Get the default kernel boot arguments for this hypervisor
+    pub fn default_kernel_args(&self) -> &'static str {
+        match self {
+            HypervisorType::Firecracker => "console=ttyS0 reboot=k panic=1 pci=off",
+            HypervisorType::CloudHypervisor => "root=/dev/vda1 reboot=k panic=1",
+        }
+    }
 }
 
 impl fmt::Display for HypervisorType {

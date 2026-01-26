@@ -345,7 +345,7 @@ async fn handle_create(client: &CliClient) {
     };
 
     let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let default_kernel = format!("{}/.glidex/vmlinux.bin", home_dir);
+    let default_kernel = format!("{}/.glidex/vmlinux", home_dir);
     let default_rootfs = format!("{}/.glidex/rootfs.ext4", home_dir);
 
     let kernel_image_path = match prompt(&format!("Kernel image path [{}]: ", default_kernel)).as_str() {
@@ -358,7 +358,7 @@ async fn handle_create(client: &CliClient) {
         s => s.to_string(),
     };
 
-    let kernel_args = prompt_optional("Kernel arguments (optional, default: console=ttyS0 reboot=k panic=1 pci=off): ");
+    let kernel_args = prompt_optional("Kernel arguments (optional, default: root=/dev/vda1 reboot=k panic=1): ");
 
     let hypervisor = match prompt("Hypervisor [firecracker/cloudhypervisor] (default: cloudhypervisor): ")
         .to_lowercase()
