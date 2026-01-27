@@ -7,7 +7,7 @@ use axum::{
 };
 use std::sync::Arc;
 
-use crate::models::{ApiError, CreateVmRequest, VmConfig, VmResponse, VmState};
+use crate::models::{ApiError, CreateVmRequest, DeviceRequest, VmConfig, VmResponse, VmState};
 use crate::state::{VmManager, VmManagerError};
 use serde::Serialize;
 
@@ -23,6 +23,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/vms/{id}/stop", post(stop_vm))
         .route("/vms/{id}/pause", post(pause_vm))
         .route("/vms/{id}/console", get(get_console_info))
+        .route("/vms/{id}/devices", post(attach_device))
+        .route("/vms/{id}/devices", delete(detach_device))
+        .route("/pci-devices", get(list_pci_devices))
         .route("/health", get(health_check))
         .with_state(state)
 }
@@ -122,6 +125,33 @@ async fn get_console_info(
                 available,
             }))
         }
+        Err(e) => Err(error_to_response(e)),
+    }
+}
+
+async fn list_pci_devices() -> impl IntoResponse {
+    let devices = crate::pci::scan_pci_devices();
+    Json(devices)
+}
+
+async fn attach_device(
+    State(manager): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<DeviceRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    match manager.attach_device(&id, request.device_path).await {
+        Ok(vm) => Ok(Json(VmResponse::from(&vm))),
+        Err(e) => Err(error_to_response(e)),
+    }
+}
+
+async fn detach_device(
+    State(manager): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<DeviceRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    match manager.detach_device(&id, &request.device_path).await {
+        Ok(vm) => Ok(Json(VmResponse::from(&vm))),
         Err(e) => Err(error_to_response(e)),
     }
 }

@@ -1,6 +1,7 @@
 mod api;
 mod hypervisor;
 mod models;
+mod pci;
 mod persistence;
 mod state;
 

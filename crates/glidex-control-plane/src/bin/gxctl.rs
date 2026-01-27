@@ -31,6 +31,9 @@ struct VmResponse {
     vcpu_count: u8,
     mem_size_mib: u32,
     hypervisor: String,
+    #[tabled(skip)]
+    #[serde(default)]
+    vfio_devices: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,12 +47,35 @@ struct CreateVmRequest {
     kernel_args: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hypervisor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vfio_devices: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ApiError {
     error: String,
     message: String,
+}
+
+#[derive(Debug, Deserialize, Tabled)]
+struct PciDeviceInfo {
+    address: String,
+    vendor_id: String,
+    device_id: String,
+    class_id: String,
+    #[tabled(display_with = "display_option")]
+    driver: Option<String>,
+    #[tabled(display_with = "display_option")]
+    iommu_group: Option<String>,
+    #[tabled(skip)]
+    sysfs_path: String,
+}
+
+fn display_option(o: &Option<String>) -> String {
+    match o {
+        Some(s) => s.clone(),
+        None => "-".to_string(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -256,6 +282,67 @@ impl CliClient {
         }
     }
 
+    async fn list_pci_devices(&self) -> Result<Vec<PciDeviceInfo>, String> {
+        let resp = self
+            .client
+            .get(format!("{}/pci-devices", self.base_url))
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if resp.status().is_success() {
+            resp.json()
+                .await
+                .map_err(|e| format!("Failed to parse response: {}", e))
+        } else {
+            Err("Failed to list PCI devices".to_string())
+        }
+    }
+
+    async fn attach_device(&self, vm_id: &str, device_path: &str) -> Result<VmResponse, String> {
+        let resp = self
+            .client
+            .post(format!("{}/vms/{}/devices", self.base_url, vm_id))
+            .json(&serde_json::json!({ "device_path": device_path }))
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if resp.status().is_success() {
+            resp.json()
+                .await
+                .map_err(|e| format!("Failed to parse response: {}", e))
+        } else {
+            let error: ApiError = resp
+                .json()
+                .await
+                .map_err(|e| format!("Failed to parse error: {}", e))?;
+            Err(format!("{}: {}", error.error, error.message))
+        }
+    }
+
+    async fn detach_device(&self, vm_id: &str, device_path: &str) -> Result<VmResponse, String> {
+        let resp = self
+            .client
+            .delete(format!("{}/vms/{}/devices", self.base_url, vm_id))
+            .json(&serde_json::json!({ "device_path": device_path }))
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if resp.status().is_success() {
+            resp.json()
+                .await
+                .map_err(|e| format!("Failed to parse response: {}", e))
+        } else {
+            let error: ApiError = resp
+                .json()
+                .await
+                .map_err(|e| format!("Failed to parse error: {}", e))?;
+            Err(format!("{}: {}", error.error, error.message))
+        }
+    }
+
     /// Resolve a VM identifier (name or ID) to an ID.
     /// First tries to use it as an ID, then searches by name.
     async fn resolve_vm(&self, name_or_id: &str) -> Result<String, String> {
@@ -297,6 +384,15 @@ fn print_help() {
     println!("  {} - Connect to VM console (interactive)", "connect <name|id>".cyan());
     println!("  {}     - Show VM serial console log", "log <name|id>".cyan());
     println!("  {} - Delete a VM", "delete <name|id>".cyan());
+    println!("  {}               - List host PCI devices", "pci".cyan());
+    println!(
+        "  {} - Attach PCI device to VM",
+        "attach-device <name|id> <path>".cyan()
+    );
+    println!(
+        "  {} - Detach PCI device from VM",
+        "detach-device <name|id> <path>".cyan()
+    );
     println!("  {}            - Check API server health", "health".cyan());
     println!("  {}              - Show this help", "help".cyan());
     println!("  {}              - Exit the CLI", "exit".cyan());
@@ -376,6 +472,19 @@ async fn handle_create(client: &CliClient) {
         }
     };
 
+    let vfio_devices = if hypervisor.as_deref() != Some("firecracker") {
+        let input = prompt_optional("VFIO PCI devices (comma-separated, e.g. /sys/bus/pci/devices/0000:41:00.0): ");
+        input.map(|s| {
+            s.split(',')
+                .map(|d| d.trim().to_string())
+                .filter(|d| !d.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty())
+    } else {
+        None
+    };
+
     let request = CreateVmRequest {
         name,
         vcpu_count,
@@ -384,6 +493,7 @@ async fn handle_create(client: &CliClient) {
         rootfs_path,
         kernel_args,
         hypervisor,
+        vfio_devices,
     };
 
     match client.create_vm(request).await {
@@ -652,6 +762,9 @@ async fn handle_command(line: &str, client: &CliClient) -> bool {
                     println!("  Hypervisor: {}", vm.hypervisor);
                     println!("  vCPUs:      {}", vm.vcpu_count);
                     println!("  Memory:     {} MiB", vm.mem_size_mib);
+                    if !vm.vfio_devices.is_empty() {
+                        println!("  VFIO:       {}", vm.vfio_devices.join(", "));
+                    }
                 }
                 Err(e) => println!("{} {}", "Error:".red(), e),
             }
@@ -787,6 +900,80 @@ async fn handle_command(line: &str, client: &CliClient) -> bool {
                 }
             } else {
                 println!("Cancelled");
+            }
+        }
+
+        "pci" | "pci-devices" => match client.list_pci_devices().await {
+            Ok(devices) => {
+                if devices.is_empty() {
+                    println!("{}", "No PCI devices found".yellow());
+                } else {
+                    let table = Table::new(&devices).to_string();
+                    println!("{}", table);
+                }
+            }
+            Err(e) => println!("{} {}", "Error:".red(), e),
+        },
+
+        "attach-device" => {
+            if parts.len() < 3 {
+                println!(
+                    "{}",
+                    "Usage: attach-device <name|id> <device-path>".yellow()
+                );
+                return true;
+            }
+            let vm_id = match client.resolve_vm(parts[1]).await {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("{} {}", "Error:".red(), e);
+                    return true;
+                }
+            };
+            match client.attach_device(&vm_id, parts[2]).await {
+                Ok(vm) => {
+                    println!(
+                        "{} Device {} attached to VM {}",
+                        "Success:".green(),
+                        parts[2],
+                        vm.name
+                    );
+                    if !vm.vfio_devices.is_empty() {
+                        println!("  VFIO devices: {}", vm.vfio_devices.join(", "));
+                    }
+                }
+                Err(e) => println!("{} {}", "Error:".red(), e),
+            }
+        }
+
+        "detach-device" => {
+            if parts.len() < 3 {
+                println!(
+                    "{}",
+                    "Usage: detach-device <name|id> <device-path>".yellow()
+                );
+                return true;
+            }
+            let vm_id = match client.resolve_vm(parts[1]).await {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("{} {}", "Error:".red(), e);
+                    return true;
+                }
+            };
+            match client.detach_device(&vm_id, parts[2]).await {
+                Ok(vm) => {
+                    println!(
+                        "{} Device {} detached from VM {}",
+                        "Success:".green(),
+                        parts[2],
+                        vm.name
+                    );
+                    if !vm.vfio_devices.is_empty() {
+                        println!("  VFIO devices: {}", vm.vfio_devices.join(", "));
+                    }
+                }
+                Err(e) => println!("{} {}", "Error:".red(), e),
             }
         }
 

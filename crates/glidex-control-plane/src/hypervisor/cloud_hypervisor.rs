@@ -44,6 +44,15 @@ struct ConsoleConfig {
 }
 
 #[derive(Debug, Serialize)]
+struct VfioDeviceConfig {
+    path: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    iommu: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct VmCreateConfig {
     cpus: CpuConfig,
     memory: MemoryConfig,
@@ -51,6 +60,8 @@ struct VmCreateConfig {
     disks: Vec<DiskConfig>,
     console: ConsoleConfig,
     serial: ConsoleConfig,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    devices: Vec<VfioDeviceConfig>,
 }
 
 /// Find the end of HTTP headers (position after the \r\n\r\n separator).
@@ -206,6 +217,15 @@ impl CloudHypervisorClient {
                 mode: "Off".to_string(),
                 file: None,
             },
+            devices: config
+                .vfio_devices
+                .iter()
+                .map(|path| VfioDeviceConfig {
+                    path: path.clone(),
+                    iommu: false,
+                    id: Some(vfio_device_id(path)),
+                })
+                .collect(),
         };
 
         let body = serde_json::to_string(&vm_config)
@@ -257,6 +277,33 @@ impl CloudHypervisorClient {
         self.expect_success("PUT", "/vm.shutdown", None)?;
         Ok(())
     }
+
+    pub fn add_device(&self, device_path: &str) -> Result<(), HypervisorError> {
+        let body = serde_json::json!({
+            "path": device_path,
+            "iommu": false,
+            "id": vfio_device_id(device_path),
+        })
+        .to_string();
+        self.expect_success("PUT", "/vm.add-device", Some(&body))?;
+        Ok(())
+    }
+
+    pub fn remove_device(&self, device_path: &str) -> Result<(), HypervisorError> {
+        let body = serde_json::json!({
+            "id": vfio_device_id(device_path),
+        })
+        .to_string();
+        self.expect_success("PUT", "/vm.remove-device", Some(&body))?;
+        Ok(())
+    }
+}
+
+/// Derive a deterministic Cloud-Hypervisor device ID from a sysfs path.
+/// e.g. "/sys/bus/pci/devices/0000:41:00.0" -> "_vfio_0000_41_00_0"
+fn vfio_device_id(path: &str) -> String {
+    let bdf = path.rsplit('/').next().unwrap_or(path);
+    format!("_vfio_{}", bdf.replace(':', "_").replace('.', "_"))
 }
 
 /// Manages a running Cloud-Hypervisor process
@@ -504,6 +551,14 @@ impl HypervisorProcess for CloudHypervisorInstance {
         let _ = std::fs::remove_file(&self.process.socket_path);
         let _ = std::fs::remove_file(&self.process.console_socket_path);
         Ok(())
+    }
+
+    fn add_device(&self, device_path: &str) -> Result<(), HypervisorError> {
+        self.client.add_device(device_path)
+    }
+
+    fn remove_device(&self, device_path: &str) -> Result<(), HypervisorError> {
+        self.client.remove_device(device_path)
     }
 
     fn is_running(&self) -> bool {

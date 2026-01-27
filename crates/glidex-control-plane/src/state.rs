@@ -336,6 +336,117 @@ impl VmManager {
         vms.values().map(|entry| entry.vm.clone()).collect()
     }
 
+    pub async fn attach_device(&self, vm_id: &str, device_path: String) -> Result<Vm, VmManagerError> {
+        let mut vms = self.vms.write().await;
+
+        let entry = vms
+            .get_mut(vm_id)
+            .ok_or_else(|| VmManagerError::VmNotFound(vm_id.to_string()))?;
+
+        // Reject if device is already attached
+        if entry.vm.config.vfio_devices.contains(&device_path) {
+            return Err(VmManagerError::InvalidState {
+                current: entry.vm.state.clone(),
+                operation: format!("attach_device: {} is already attached", device_path),
+            });
+        }
+
+        match entry.vm.state {
+            VmState::Running => {
+                // Hot-plug: call hypervisor API, then update config
+                if let Some(ref process) = entry.process {
+                    process.add_device(&device_path)?;
+                } else {
+                    return Err(VmManagerError::InvalidState {
+                        current: entry.vm.state.clone(),
+                        operation: "attach_device (no process handle)".to_string(),
+                    });
+                }
+
+                entry.vm.config.vfio_devices.push(device_path);
+
+                // Persist updated config. On failure, rollback the hot-plug.
+                if let Err(e) = self.store.save(&entry.vm) {
+                    let removed = entry.vm.config.vfio_devices.pop();
+                    if let (Some(ref process), Some(path)) = (&entry.process, removed) {
+                        let _ = process.remove_device(&path);
+                    }
+                    return Err(e.into());
+                }
+
+                Ok(entry.vm.clone())
+            }
+            VmState::Created | VmState::Stopped => {
+                // Config-only: device will be included at next VM start
+                entry.vm.config.vfio_devices.push(device_path);
+                self.store.save(&entry.vm)?;
+                Ok(entry.vm.clone())
+            }
+            VmState::Paused => Err(VmManagerError::InvalidState {
+                current: VmState::Paused,
+                operation: "attach_device".to_string(),
+            }),
+        }
+    }
+
+    pub async fn detach_device(&self, vm_id: &str, device_path: &str) -> Result<Vm, VmManagerError> {
+        let mut vms = self.vms.write().await;
+
+        let entry = vms
+            .get_mut(vm_id)
+            .ok_or_else(|| VmManagerError::VmNotFound(vm_id.to_string()))?;
+
+        // Check that the device is actually attached
+        let pos = entry
+            .vm
+            .config
+            .vfio_devices
+            .iter()
+            .position(|d| d == device_path)
+            .ok_or_else(|| VmManagerError::InvalidState {
+                current: entry.vm.state.clone(),
+                operation: format!("detach_device: {} is not attached", device_path),
+            })?;
+
+        match entry.vm.state {
+            VmState::Running => {
+                // Hot-unplug: call hypervisor API, then update config
+                if let Some(ref process) = entry.process {
+                    process.remove_device(device_path)?;
+                } else {
+                    return Err(VmManagerError::InvalidState {
+                        current: entry.vm.state.clone(),
+                        operation: "detach_device (no process handle)".to_string(),
+                    });
+                }
+
+                let removed = entry.vm.config.vfio_devices.remove(pos);
+
+                // Persist updated config. On failure, rollback.
+                if let Err(e) = self.store.save(&entry.vm) {
+                    // Re-insert at original position
+                    entry.vm.config.vfio_devices.insert(pos, removed.clone());
+                    if let Some(ref process) = entry.process {
+                        let _ = process.add_device(&removed);
+                    }
+                    return Err(e.into());
+                }
+
+                Ok(entry.vm.clone())
+            }
+            VmState::Created | VmState::Stopped => {
+                // Config-only: just remove from the device list
+                entry.vm.config.vfio_devices.remove(pos);
+                self.store.save(&entry.vm)?;
+                Ok(entry.vm.clone())
+            }
+            VmState::Paused => Err(VmManagerError::InvalidState {
+                current: VmState::Paused,
+                operation: "detach_device".to_string(),
+            }),
+        }
+    }
+
     pub async fn delete_vm(&self, vm_id: &str) -> Result<(), VmManagerError> {
         let mut vms = self.vms.write().await;
 

@@ -13,6 +13,7 @@ pub fn CreateVmForm(
     let (kernel_path, set_kernel_path) = signal(String::new());
     let (rootfs_path, set_rootfs_path) = signal(String::new());
     let (kernel_args, set_kernel_args) = signal(String::new());
+    let (vfio_devices, set_vfio_devices) = signal(String::new());
     let (submitting, set_submitting) = signal(false);
 
     let default_kernel = "~/.glidex/vmlinux".to_string();
@@ -46,6 +47,19 @@ pub fn CreateVmForm(
                 None
             } else {
                 Some(kernel_args.get())
+            },
+            vfio_devices: {
+                let raw = vfio_devices.get();
+                if raw.is_empty() {
+                    None
+                } else {
+                    let devices: Vec<String> = raw
+                        .split(',')
+                        .map(|d| d.trim().to_string())
+                        .filter(|d| !d.is_empty())
+                        .collect();
+                    if devices.is_empty() { None } else { Some(devices) }
+                }
             },
         };
 
@@ -132,6 +146,18 @@ pub fn CreateVmForm(
                     prop:value=move || kernel_args.get()
                     on:input=move |ev| set_kernel_args.set(event_target_value(&ev))
                 />
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">"VFIO PCI Devices (optional)"</label>
+                <input
+                    type="text"
+                    class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                    placeholder="/sys/bus/pci/devices/0000:41:00.0"
+                    prop:value=move || vfio_devices.get()
+                    on:input=move |ev| set_vfio_devices.set(event_target_value(&ev))
+                />
+                <p class="mt-1 text-xs text-gray-500">"Comma-separated VFIO device paths for GPU passthrough (Cloud Hypervisor only)"</p>
             </div>
 
             <div class="flex justify-end space-x-3 pt-4">

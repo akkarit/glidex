@@ -17,6 +17,7 @@ pub fn VmCard(
     let vm_state = vm.state.clone();
     let mem_display = format!("{} MiB", vm.mem_size_mib);
     let vcpu_display = vm.vcpu_count;
+    let vfio_count = vm.vfio_devices.len();
     let link_href = format!("/vms/{}", vm_id_link);
 
     view! {
@@ -46,6 +47,18 @@ pub fn VmCard(
                     <span class="text-gray-500">"Memory:"</span>
                     <span class="ml-2 font-medium text-gray-900">{mem_display}</span>
                 </div>
+                {if vfio_count > 0 {
+                    Some(view! {
+                        <div>
+                            <span class="text-gray-500">"GPU:"</span>
+                            <span class="ml-2 font-medium text-gray-900">
+                                {format!("{} device{}", vfio_count, if vfio_count == 1 { "" } else { "s" })}
+                            </span>
+                        </div>
+                    })
+                } else {
+                    None
+                }}
             </div>
 
             <div class="mt-4 pt-4 border-t border-gray-100">

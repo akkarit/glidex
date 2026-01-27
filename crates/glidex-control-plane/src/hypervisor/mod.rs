@@ -106,6 +106,22 @@ pub trait HypervisorProcess: Send + Sync {
     /// Kill the hypervisor process
     fn kill(&self) -> Result<(), HypervisorError>;
 
+    /// Hot-add a VFIO device to a running VM
+    fn add_device(&self, device_path: &str) -> Result<(), HypervisorError> {
+        Err(HypervisorError::Unsupported(format!(
+            "add_device not supported by this hypervisor (device: {})",
+            device_path
+        )))
+    }
+
+    /// Hot-remove a VFIO device from a running VM
+    fn remove_device(&self, device_path: &str) -> Result<(), HypervisorError> {
+        Err(HypervisorError::Unsupported(format!(
+            "remove_device not supported by this hypervisor (device: {})",
+            device_path
+        )))
+    }
+
     /// Check if the process is still running
     fn is_running(&self) -> bool;
 

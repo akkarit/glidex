@@ -20,6 +20,8 @@ pub struct VmConfig {
     pub kernel_args: String,
     #[serde(default)]
     pub hypervisor: HypervisorType,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vfio_devices: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +68,8 @@ pub struct CreateVmRequest {
     pub kernel_args: Option<String>,
     #[serde(default)]
     pub hypervisor: Option<HypervisorType>,
+    #[serde(default)]
+    pub vfio_devices: Option<Vec<String>>,
 }
 
 impl From<CreateVmRequest> for VmConfig {
@@ -80,6 +84,7 @@ impl From<CreateVmRequest> for VmConfig {
                 .kernel_args
                 .unwrap_or_else(|| hypervisor.default_kernel_args().to_string()),
             hypervisor,
+            vfio_devices: req.vfio_devices.unwrap_or_default(),
         }
     }
 }
@@ -94,6 +99,8 @@ pub struct VmResponse {
     pub console_socket_path: String,
     pub log_path: String,
     pub hypervisor: HypervisorType,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vfio_devices: Vec<String>,
 }
 
 impl From<&Vm> for VmResponse {
@@ -107,8 +114,14 @@ impl From<&Vm> for VmResponse {
             console_socket_path: vm.console_socket_path.clone(),
             log_path: vm.log_path.clone(),
             hypervisor: vm.hypervisor,
+            vfio_devices: vm.config.vfio_devices.clone(),
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeviceRequest {
+    pub device_path: String,
 }
 
 #[derive(Debug, Serialize)]

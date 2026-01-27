@@ -38,6 +38,8 @@ pub struct VmResponse {
     pub mem_size_mib: u32,
     pub console_socket_path: String,
     pub log_path: String,
+    #[serde(default)]
+    pub vfio_devices: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +51,8 @@ pub struct CreateVmRequest {
     pub rootfs_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kernel_args: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vfio_devices: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

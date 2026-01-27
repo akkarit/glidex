@@ -113,6 +113,7 @@ pub fn VmDetail() -> impl IntoView {
                                 let log_path_display = vm.log_path.clone();
                                 let mem_display = format!("{} MiB", vm.mem_size_mib);
                                 let vcpu_display = vm.vcpu_count;
+                                let vfio_devices = vm.vfio_devices.clone();
 
                                 view! {
                                     <div class="bg-white rounded-xl shadow-md p-6 border border-gray-100 mt-4">
@@ -152,6 +153,21 @@ pub fn VmDetail() -> impl IntoView {
                                                 </div>
                                             </div>
                                         </div>
+
+                                        {if !vfio_devices.is_empty() {
+                                            Some(view! {
+                                                <div class="mb-6">
+                                                    <h3 class="text-sm font-medium text-gray-500 mb-2">"VFIO PCI Devices"</h3>
+                                                    <ul class="space-y-1">
+                                                        {vfio_devices.iter().map(|dev| view! {
+                                                            <li class="font-mono text-sm text-gray-700">{dev.clone()}</li>
+                                                        }).collect::<Vec<_>>()}
+                                                    </ul>
+                                                </div>
+                                            })
+                                        } else {
+                                            None
+                                        }}
 
                                         <div class="pt-6 border-t border-gray-100">
                                             <h3 class="text-sm font-medium text-gray-500 mb-3">"Actions"</h3>
