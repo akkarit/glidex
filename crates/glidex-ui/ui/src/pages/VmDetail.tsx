@@ -145,13 +145,13 @@ export default function VmDetail() {
             </div>
           </div>
 
-          {vm.vfio_devices.length > 0 && (
+          {(vm.vfio_devices ?? []).length > 0 && (
             <div className="mb-6">
               <h3 className="text-sm font-medium text-gray-500 mb-2">
                 VFIO PCI Devices
               </h3>
               <ul className="space-y-1">
-                {vm.vfio_devices.map((dev) => (
+                {(vm.vfio_devices ?? []).map((dev) => (
                   <li key={dev} className="font-mono text-sm text-gray-700">
                     {dev}
                   </li>

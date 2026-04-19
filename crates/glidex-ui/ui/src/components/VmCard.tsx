@@ -9,7 +9,7 @@ interface VmCardProps {
 }
 
 export default function VmCard({ vm, onAction }: VmCardProps) {
-  const vfioCount = vm.vfio_devices.length;
+  const vfioCount = (vm.vfio_devices ?? []).length;
 
   return (
     <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-shadow duration-200">
