@@ -1,5 +1,13 @@
 export type VmState = "created" | "running" | "paused" | "stopped";
 
+export type HypervisorType = "cloudhypervisor" | "firecracker" | "qemu";
+
+export const HYPERVISOR_LABELS: Record<HypervisorType, string> = {
+  cloudhypervisor: "Cloud Hypervisor",
+  firecracker: "Firecracker",
+  qemu: "QEMU",
+};
+
 export interface VmResponse {
   id: string;
   name: string;
@@ -8,6 +16,7 @@ export interface VmResponse {
   mem_size_mib: number;
   console_socket_path: string;
   log_path: string;
+  hypervisor: HypervisorType;
   vfio_devices: string[];
 }
 
@@ -18,6 +27,7 @@ export interface CreateVmRequest {
   kernel_image_path: string;
   rootfs_path: string;
   kernel_args?: string;
+  hypervisor?: HypervisorType;
   vfio_devices?: string[];
 }
 

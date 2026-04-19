@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import type { CreateVmRequest } from "../types";
+import type { CreateVmRequest, HypervisorType } from "../types";
+import { HYPERVISOR_LABELS } from "../types";
 
 interface CreateVmFormProps {
   onSubmit: (request: CreateVmRequest) => void;
@@ -10,6 +11,7 @@ export default function CreateVmForm({ onSubmit, onCancel }: CreateVmFormProps) 
   const [name, setName] = useState("");
   const [vcpuCount, setVcpuCount] = useState(1);
   const [memSizeMib, setMemSizeMib] = useState(512);
+  const [hypervisor, setHypervisor] = useState<HypervisorType>("cloudhypervisor");
   const [kernelPath, setKernelPath] = useState("");
   const [rootfsPath, setRootfsPath] = useState("");
   const [kernelArgs, setKernelArgs] = useState("");
@@ -31,6 +33,7 @@ export default function CreateVmForm({ onSubmit, onCancel }: CreateVmFormProps) 
       mem_size_mib: memSizeMib,
       kernel_image_path: kernelPath || "~/.glidex/vmlinux",
       rootfs_path: rootfsPath || "~/.glidex/rootfs.ext4",
+      hypervisor,
       kernel_args: kernelArgs || undefined,
       vfio_devices: devices.length > 0 ? devices : undefined,
     });
@@ -50,6 +53,25 @@ export default function CreateVmForm({ onSubmit, onCancel }: CreateVmFormProps) 
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700">
+          Hypervisor Backend
+        </label>
+        <select
+          className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent bg-white"
+          value={hypervisor}
+          onChange={(e) => setHypervisor(e.target.value as HypervisorType)}
+        >
+          {(Object.entries(HYPERVISOR_LABELS) as [HypervisorType, string][]).map(
+            ([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ),
+          )}
+        </select>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

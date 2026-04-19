@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import * as api from "../api";
 import type { VmResponse } from "../types";
-import { stateColor, stateLabel } from "../types";
+import { stateColor, stateLabel, HYPERVISOR_LABELS } from "../types";
 import VmActions, { type VmAction } from "../components/VmActions";
 import { Loading } from "../components/Loading";
 
@@ -112,6 +112,14 @@ export default function VmDetail() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">
+                  Hypervisor
+                </h3>
+                <p className="text-lg font-semibold text-gray-900">
+                  {HYPERVISOR_LABELS[vm.hypervisor] ?? vm.hypervisor}
+                </p>
+              </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">
                   vCPU Count

@@ -70,6 +70,7 @@ impl VmManager {
         let mut backends: HashMap<HypervisorType, Box<dyn Hypervisor>> = HashMap::new();
         backends.insert(HypervisorType::Firecracker, create_backend(HypervisorType::Firecracker));
         backends.insert(HypervisorType::CloudHypervisor, create_backend(HypervisorType::CloudHypervisor));
+        backends.insert(HypervisorType::Qemu, create_backend(HypervisorType::Qemu));
 
         Ok(Arc::new(Self {
             vms: RwLock::new(HashMap::new()),

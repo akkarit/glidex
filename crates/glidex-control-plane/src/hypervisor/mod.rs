@@ -1,5 +1,6 @@
 pub mod cloud_hypervisor;
 pub mod firecracker;
+pub mod qemu;
 
 use crate::models::VmConfig;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,7 @@ pub enum HypervisorType {
     Firecracker,
     #[default]
     CloudHypervisor,
+    Qemu,
 }
 
 impl HypervisorType {
@@ -21,6 +23,7 @@ impl HypervisorType {
         match self {
             HypervisorType::Firecracker => "firecracker",
             HypervisorType::CloudHypervisor => "cloud-hypervisor",
+            HypervisorType::Qemu => "qemu-system-x86_64",
         }
     }
 
@@ -29,6 +32,7 @@ impl HypervisorType {
         match self {
             HypervisorType::Firecracker => "firecracker",
             HypervisorType::CloudHypervisor => "cloud-hypervisor",
+            HypervisorType::Qemu => "qemu",
         }
     }
 
@@ -37,6 +41,7 @@ impl HypervisorType {
         match self {
             HypervisorType::Firecracker => "console=ttyS0 reboot=k panic=1 pci=off",
             HypervisorType::CloudHypervisor => "root=/dev/vda1 reboot=k panic=1",
+            HypervisorType::Qemu => "console=ttyS0 root=/dev/vda1 reboot=k panic=1",
         }
     }
 }
@@ -46,6 +51,7 @@ impl fmt::Display for HypervisorType {
         match self {
             HypervisorType::Firecracker => write!(f, "firecracker"),
             HypervisorType::CloudHypervisor => write!(f, "cloudhypervisor"),
+            HypervisorType::Qemu => write!(f, "qemu"),
         }
     }
 }
@@ -140,5 +146,6 @@ pub fn create_backend(hypervisor_type: HypervisorType) -> Box<dyn Hypervisor> {
     match hypervisor_type {
         HypervisorType::Firecracker => Box::new(firecracker::FirecrackerBackend),
         HypervisorType::CloudHypervisor => Box::new(cloud_hypervisor::CloudHypervisorBackend),
+        HypervisorType::Qemu => Box::new(qemu::QemuBackend),
     }
 }

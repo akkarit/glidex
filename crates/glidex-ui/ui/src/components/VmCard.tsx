@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { VmResponse } from "../types";
-import { stateColor, stateLabel } from "../types";
+import { stateColor, stateLabel, HYPERVISOR_LABELS } from "../types";
 import VmActions, { type VmAction } from "./VmActions";
 
 interface VmCardProps {
@@ -36,6 +36,12 @@ export default function VmCard({ vm, onAction }: VmCardProps) {
           <span className="text-gray-500">vCPUs:</span>
           <span className="ml-2 font-medium text-gray-900">
             {vm.vcpu_count}
+          </span>
+        </div>
+        <div>
+          <span className="text-gray-500">Hypervisor:</span>
+          <span className="ml-2 font-medium text-gray-900">
+            {HYPERVISOR_LABELS[vm.hypervisor] ?? vm.hypervisor}
           </span>
         </div>
         <div>
