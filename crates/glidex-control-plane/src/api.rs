@@ -1,11 +1,16 @@
 use axum::{
-    extract::{Path, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
+    },
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
 };
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 
 use crate::models::{ApiError, CreateVmRequest, DeviceRequest, VmConfig, VmResponse, VmState};
 use crate::state::{VmManager, VmManagerError};
@@ -23,6 +28,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/vms/{id}/stop", post(stop_vm))
         .route("/vms/{id}/pause", post(pause_vm))
         .route("/vms/{id}/console", get(get_console_info))
+        .route("/vms/{id}/console/ws", get(console_ws))
         .route("/vms/{id}/devices", post(attach_device))
         .route("/vms/{id}/devices", delete(detach_device))
         .route("/pci-devices", get(list_pci_devices))
@@ -153,6 +159,80 @@ async fn detach_device(
     match manager.detach_device(&id, &request.device_path).await {
         Ok(vm) => Ok(Json(VmResponse::from(&vm))),
         Err(e) => Err(error_to_response(e)),
+    }
+}
+
+async fn console_ws(
+    State(manager): State<AppState>,
+    Path(id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let vm = match manager.get_vm(&id).await {
+        Ok(vm) => vm,
+        Err(VmManagerError::VmNotFound(_)) => {
+            return (StatusCode::NOT_FOUND, "VM not found").into_response();
+        }
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+
+    let console_path = vm.console_socket_path.clone();
+    ws.on_upgrade(move |socket| bridge_console(socket, console_path))
+}
+
+/// Pump bytes in both directions between a browser WebSocket and the VM's
+/// console Unix socket until either side closes. The console proxy thread in
+/// the hypervisor backend keeps the listener alive even after the guest
+/// exits, so connecting to a dead VM still succeeds and replays the log.
+async fn bridge_console(mut ws: WebSocket, console_path: String) {
+    let unix = match UnixStream::connect(&console_path).await {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = ws
+                .send(Message::Text(
+                    format!("Failed to connect to console socket {}: {}", console_path, e)
+                        .into(),
+                ))
+                .await;
+            let _ = ws.send(Message::Close(None)).await;
+            return;
+        }
+    };
+    let (mut unix_rx, mut unix_tx) = unix.into_split();
+    let mut buf = [0u8; 4096];
+
+    loop {
+        tokio::select! {
+            read = unix_rx.read(&mut buf) => {
+                match read {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let chunk: Vec<u8> = buf[..n].to_vec();
+                        if ws.send(Message::Binary(chunk.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            msg = ws.recv() => {
+                match msg {
+                    Some(Ok(Message::Binary(data))) => {
+                        if unix_tx.write_all(&data).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        if unix_tx.write_all(text.as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        }
     }
 }
 

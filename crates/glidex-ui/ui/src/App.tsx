@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import Header from "./components/Header";
 import Dashboard from "./pages/Dashboard";
 import VmDetail from "./pages/VmDetail";
+import VmConsole from "./pages/VmConsole";
 import NotFound from "./pages/NotFound";
 
 export default function App() {
@@ -12,6 +13,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/vms/:id" element={<VmDetail />} />
+          <Route path="/vms/:id/console" element={<VmConsole />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

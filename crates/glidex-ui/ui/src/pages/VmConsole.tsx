@@ -1,0 +1,138 @@
+import { useEffect, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
+
+type Status = "connecting" | "connected" | "closed" | "error";
+
+export default function VmConsole() {
+  const { id } = useParams<{ id: string }>();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<Status>("connecting");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!id || !containerRef.current) return;
+
+    const term = new Terminal({
+      fontFamily: "Menlo, Monaco, Consolas, monospace",
+      fontSize: 13,
+      cursorBlink: true,
+      convertEol: true,
+      theme: { background: "#000000", foreground: "#e6e6e6" },
+    });
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(containerRef.current);
+    fitAddon.fit();
+
+    const handleResize = () => {
+      try {
+        fitAddon.fit();
+      } catch {
+        /* container not laid out yet */
+      }
+    };
+    window.addEventListener("resize", handleResize);
+
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProto}//${window.location.host}/api/vms/${id}/console/ws`;
+    const ws = new WebSocket(wsUrl);
+    ws.binaryType = "arraybuffer";
+
+    ws.onopen = () => {
+      setStatus("connected");
+      setError(null);
+    };
+    ws.onclose = (ev) => {
+      setStatus("closed");
+      if (ev.code !== 1000 && ev.code !== 1005) {
+        setError(`WebSocket closed (code ${ev.code})`);
+      }
+    };
+    ws.onerror = () => {
+      setStatus("error");
+      setError("WebSocket connection error");
+    };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === "string") {
+        term.write(ev.data);
+      } else {
+        term.write(new Uint8Array(ev.data as ArrayBuffer));
+      }
+    };
+
+    const encoder = new TextEncoder();
+    const inputDisposable = term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(encoder.encode(data));
+      }
+    });
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      inputDisposable.dispose();
+      try {
+        ws.close();
+      } catch {
+        /* already closed */
+      }
+      term.dispose();
+    };
+  }, [id]);
+
+  const statusColor =
+    status === "connected"
+      ? "text-green-600"
+      : status === "error"
+        ? "text-red-600"
+        : status === "closed"
+          ? "text-gray-500"
+          : "text-sky-600";
+
+  return (
+    <div className="flex flex-col" style={{ height: "calc(100vh - 140px)" }}>
+      <div className="flex items-center justify-between mb-3">
+        <Link
+          to={`/vms/${id}`}
+          className="text-sky-600 hover:text-sky-700 inline-flex items-center"
+        >
+          <svg
+            className="w-4 h-4 mr-1"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+          Back to VM
+        </Link>
+        <span className="text-sm text-gray-600">
+          Status: <span className={`font-medium ${statusColor}`}>{status}</span>
+        </span>
+      </div>
+
+      {error && (
+        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          {error}
+        </div>
+      )}
+
+      <div
+        ref={containerRef}
+        className="flex-1 rounded-lg overflow-hidden border border-gray-800"
+        style={{ backgroundColor: "#000" }}
+      />
+
+      <p className="mt-2 text-xs text-gray-500">
+        Tip: input is sent directly to the VM's serial console.
+      </p>
+    </div>
+  );
+}

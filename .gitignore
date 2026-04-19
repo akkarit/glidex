@@ -2,3 +2,4 @@
 *.ext4
 vmlinux.bin
 /kernel-images
+*.tsbuildinfo
