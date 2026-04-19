@@ -1,0 +1,184 @@
+# Data model
+
+All persisted and API-exposed types live in
+`crates/glidex-control-plane/src/models.rs`.
+
+## Core types
+
+### `VmState`
+
+```rust
+pub enum VmState { Created, Running, Paused, Stopped }
+```
+
+Serialized lower-case. Valid transitions:
+
+```
+Created ─start──▶ Running
+Stopped ─start──▶ Running
+Running ─pause──▶ Paused
+Paused  ─start──▶ Running     (treated as "resume" internally)
+Running ─stop───▶ Stopped
+Paused  ─stop───▶ Stopped
+```
+
+Any other transition is rejected with
+`VmManagerError::InvalidState { current, operation }`.
+
+### `VmConfig`
+
+The guest configuration the hypervisor needs to boot:
+
+- `vcpu_count: u8`
+- `mem_size_mib: u32`
+- `kernel_image_path: String`
+- `rootfs_path: String`
+- `kernel_args: String`
+- `hypervisor: HypervisorType` (`qemu` by default; `#[default]` on
+  `HypervisorType::Qemu` in `hypervisor/mod.rs`)
+- `vfio_devices: Vec<String>` — sysfs paths
+  (e.g. `/sys/bus/pci/devices/0000:41:00.0`), may be empty
+
+**Invariant.** `kernel_image_path` and `rootfs_path` are tilde-expanded
+at the moment `VmConfig` is built from `CreateVmRequest`. Hypervisors
+do not do shell expansion themselves; keeping expansion at the API
+boundary means every backend sees a filesystem-ready path.
+
+**Invariant.** Once the VM is created, `kernel_image_path` /
+`rootfs_path` / `kernel_args` / `hypervisor` do not change — only
+`vfio_devices` can be mutated at runtime via
+attach/detach-device.
+
+### `Vm`
+
+The persistent record:
+
+```rust
+pub struct Vm {
+    pub id: String,                    // UUIDv4
+    pub name: String,                  // unique, user-chosen
+    pub state: VmState,
+    pub config: VmConfig,
+    pub socket_path: String,           // hypervisor API socket
+    pub console_socket_path: String,   // client-facing console
+    pub log_path: String,              // captured serial output
+    pub hypervisor: HypervisorType,    // duplicated from config for quick access
+}
+```
+
+`Vm::new` derives the three paths deterministically:
+
+```
+/tmp/<prefix>-<id>.sock
+/tmp/<prefix>-<id>.console.sock
+/tmp/<prefix>-<id>.log
+```
+
+where `<prefix>` comes from `HypervisorType::socket_prefix()`:
+`firecracker`, `cloud-hypervisor`, or `qemu`.
+
+### `HypervisorType`
+
+```rust
+pub enum HypervisorType { Firecracker, CloudHypervisor, Qemu }
+```
+
+Serialized lowercase (`"firecracker" | "cloudhypervisor" | "qemu"`).
+Default is `Qemu` — most broadly available on a typical Linux host.
+Each variant knows its binary name, socket path prefix, and a
+sensible default `kernel_args` string (see `hypervisor/mod.rs`).
+
+## Request / response types
+
+`CreateVmRequest` is the JSON body of `POST /vms`. Optional fields:
+
+- `kernel_args` — omitted → use
+  `HypervisorType::default_kernel_args()` for the chosen backend.
+- `hypervisor` — omitted → `HypervisorType::default()` (currently `qemu`).
+- `vfio_devices` — omitted → empty list.
+
+`VmResponse` is the API projection — a strict subset of `Vm`:
+
+- `id, name, state, vcpu_count, mem_size_mib, console_socket_path,
+  log_path, hypervisor, vfio_devices`.
+- Intentionally hides `socket_path` and the full `config` (e.g.
+  `kernel_args` is not surfaced), because clients don't need it.
+
+`DeviceRequest` is the body for attach/detach:
+
+```json
+{ "device_path": "/sys/bus/pci/devices/0000:41:00.0" }
+```
+
+`ApiError` is the uniform error envelope:
+
+```json
+{ "error": "not_found", "message": "VM not found: <id>" }
+```
+
+`error` values: `not_found | conflict | invalid_state |
+hypervisor_error | persistence_error | hypervisor_unavailable`.
+See [rest-api.md](rest-api.md) for the HTTP status code mapping.
+
+## Persistence schema
+
+### Storage
+
+**ReDB** single-file database at `~/.glidex/glidex.db`
+(override via `VmManager::with_db_path`). ReDB is an embedded,
+copy-on-write, ACID key-value store — chosen over SQLite to avoid a
+C dependency and over sled for its simpler transactional model.
+
+### Table
+
+`vms: TableDefinition<&str, &[u8]>`
+
+- **Key**: `Vm.id` as a `&str`.
+- **Value**: `serde_json::to_vec(&vm)` — the whole `Vm` struct.
+
+We chose JSON (not bincode / postcard) because on-disk records are
+rarely migrated and human-inspectable disk state is useful when
+debugging. Performance is not a concern at the numbers of VMs
+a single host actually runs.
+
+### Write ordering
+
+`VmManager` writes to ReDB **before** updating in-memory state and
+**before** taking any externally-visible action.
+
+- `create_vm`: `store.save` → insert into map.
+- `start_vm`: spawn + configure + start the hypervisor, then
+  `store.update_state(Running)` before flipping `entry.vm.state`.
+  If the persist fails, the hypervisor process is killed to keep
+  on-disk and process state consistent.
+- `pause_vm`: call hypervisor pause, `store.update_state(Paused)`,
+  then flip in-memory state. If the persist fails, resume the VM
+  via the hypervisor to roll back.
+- `stop_vm`: kill the hypervisor process (irreversible), flip
+  in-memory state, best-effort `store.update_state(Stopped)` —
+  log-and-continue on failure because the process is already gone;
+  reconciliation will converge on restart.
+- `attach_device` / `detach_device` (running VM): invoke hypervisor
+  hot-plug API first, then `store.save` the updated `Vm`. If
+  persist fails, roll the hot-plug back.
+- `delete_vm`: kill the process, `store.delete`, then remove from
+  the in-memory map.
+
+### Reconciliation on startup
+
+`VmManager::initialize()` is called once after `main` opens the DB:
+
+1. Load all `Vm`s from ReDB.
+2. For each, `reconcile_vm_state`:
+   - If persisted state was `Created` or `Stopped`: keep as-is.
+   - If `Running` / `Paused`: the control plane has no process
+     handle for it anymore. If the hypervisor API socket file
+     still exists, an *orphaned* hypervisor process is presumed
+     running; we clean up socket files and forcibly mark the VM
+     `Stopped`. If the socket file is gone, the hypervisor is
+     assumed dead; still mark `Stopped`.
+3. If state changed, persist the new state.
+4. Insert into the in-memory map with `process: None`.
+
+The effect is: **stale in-memory state never survives a restart.**
+The user's config always does.
