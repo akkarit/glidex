@@ -31,7 +31,7 @@ export default function CreateVmForm({ onSubmit, onCancel }: CreateVmFormProps) 
       name,
       vcpu_count: vcpuCount,
       mem_size_mib: memSizeMib,
-      kernel_image_path: kernelPath || "~/.glidex/vmlinux",
+      kernel_image_path: kernelPath || "~/.glidex/vmlinux.bin",
       rootfs_path: rootfsPath || "~/.glidex/rootfs.ext4",
       hypervisor,
       kernel_args: kernelArgs || undefined,
@@ -110,7 +110,7 @@ export default function CreateVmForm({ onSubmit, onCancel }: CreateVmFormProps) 
         <input
           type="text"
           className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent"
-          placeholder="~/.glidex/vmlinux"
+          placeholder="~/.glidex/vmlinux.bin"
           value={kernelPath}
           onChange={(e) => setKernelPath(e.target.value)}
         />

@@ -1,6 +1,6 @@
 # Glidex
 
-A Rust-based control plane for managing microVMs with support for multiple hypervisors including [Firecracker](https://firecracker-microvm.github.io/) and [Cloud-Hypervisor](https://www.cloudhypervisor.org/).
+A Rust-based control plane for managing microVMs with support for multiple hypervisors including [Firecracker](https://firecracker-microvm.github.io/), [Cloud-Hypervisor](https://www.cloudhypervisor.org/), and [QEMU](https://www.qemu.org/).
 
 ```
    _____ _ _     _
@@ -13,9 +13,9 @@ A Rust-based control plane for managing microVMs with support for multiple hyper
 
 ## Features
 
-- **Multi-hypervisor support** - Control both Firecracker and Cloud-Hypervisor VMs through a unified interface
+- **Multi-hypervisor support** - Control Firecracker, Cloud-Hypervisor, and QEMU VMs through a unified interface
 - **REST API** for VM lifecycle management (create, start, stop, pause, delete)
-- **Web UI** - Modern Leptos-based web interface for VM management
+- **Web UI** - Vite + React web interface for VM management
 - **Interactive CLI** (`gxctl`) with command history and tab completion
 - **Interactive console** - connect to VM serial console with full I/O support
 - **Console logging** - persistent logs of all VM console output
@@ -30,23 +30,19 @@ A Rust-based control plane for managing microVMs with support for multiple hyper
 git clone https://github.com/yourusername/glidex.git
 cd glidex
 
-# Run the installer (installs Rust, Firecracker, builds the project)
-./install.sh
+# Run the installer (installs Rust, Bun, hypervisors, builds the project)
+cargo run -p glidex-install
 ```
 
 The installer will:
-1. Install Rust (if not present)
-2. Download and install Firecracker v1.14.0
-3. Build the Glidex binaries
-4. Optionally download sample kernel and rootfs images to `~/.glidex/`
-
-For Cloud-Hypervisor support, install it separately:
-```bash
-# Download Cloud-Hypervisor (check https://github.com/cloud-hypervisor/cloud-hypervisor/releases for latest)
-wget https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v44.0/cloud-hypervisor-static
-chmod +x cloud-hypervisor-static
-sudo mv cloud-hypervisor-static /usr/local/bin/cloud-hypervisor
-```
+1. Install Rust via rustup (if not present)
+2. Install Bun for the UI dev server (if not present)
+3. Install Cloud-Hypervisor (default hypervisor)
+4. Optionally install Firecracker and QEMU
+5. Check KVM access
+6. Build the Glidex binaries
+7. Install UI npm dependencies (`bun install`)
+8. Optionally download sample kernel and rootfs images to `~/.glidex/`
 
 ### Manual Installation
 
@@ -75,11 +71,10 @@ The server listens on `http://localhost:8080` by default.
 2. **Option A: Start the Web UI:**
 
 ```bash
-cd crates/glidex-ui
-cargo leptos watch
+cargo run -p glidex-ui
 ```
 
-Open http://localhost:3000 in your browser.
+Open http://localhost:5173 in your browser.
 
 3. **Option B: Start the CLI:**
 
@@ -97,7 +92,7 @@ Memory (MiB) [512]: 1024
 Kernel image path [~/.glidex/vmlinux.bin]:
 Root filesystem path [~/.glidex/rootfs.ext4]:
 Kernel arguments (optional):
-Hypervisor [firecracker/cloudhypervisor] (default: cloudhypervisor):
+Hypervisor [firecracker/cloudhypervisor/qemu] (default: cloudhypervisor):
 
 gxctl> start my-vm
 ```
@@ -166,6 +161,7 @@ gxctl> log my-vm
 The `hypervisor` field is optional and defaults to `"cloudhypervisor"`. Supported values:
 - `"cloudhypervisor"` - Use Cloud-Hypervisor (default)
 - `"firecracker"` - Use Firecracker hypervisor
+- `"qemu"` - Use QEMU (requires `qemu-system-x86_64`)
 
 ### Example: Create and Start a VM with curl
 
@@ -193,7 +189,7 @@ curl http://localhost:8080/vms
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                   glidex-ui (Web UI)                        │
-│  - Leptos SSR + Hydration                                   │
+│  - Vite + React + TypeScript                                │
 │  - Dashboard, VM management                                 │
 │  - Real-time status updates                                 │
 └─────────────────┬───────────────────────────────────────────┘
@@ -213,14 +209,14 @@ curl http://localhost:8080/vms
 │  - Console logging                                          │
 │  - Persistence (ReDB)                                       │
 └─────────────────┬───────────────────────────────────────────┘
-                  │ Unix Socket (Hypervisor API)
-        ┌─────────┴─────────┐
-        ▼                   ▼
-┌───────────────┐   ┌───────────────────┐
-│  Firecracker  │   │  Cloud-Hypervisor │
-│  - microVM    │   │  - microVM        │
-│  - KVM-based  │   │  - KVM-based      │
-└───────────────┘   └───────────────────┘
+                  │ Unix Socket (Hypervisor API / QMP)
+        ┌─────────┼─────────┐
+        ▼         ▼         ▼
+┌────────────┐ ┌────────────┐ ┌────────┐
+│ Firecracker│ │Cloud-Hypvsr│ │  QEMU  │
+│   microVM  │ │   microVM  │ │  VM    │
+│ KVM-based  │ │ KVM-based  │ │  KVM   │
+└────────────┘ └────────────┘ └────────┘
 ```
 
 ### Hypervisor Abstraction
@@ -231,7 +227,8 @@ The control plane uses a trait-based abstraction to support multiple hypervisors
 hypervisor/
 ├── mod.rs              # Hypervisor and HypervisorProcess traits
 ├── firecracker.rs      # Firecracker implementation
-└── cloud_hypervisor.rs # Cloud-Hypervisor implementation
+├── cloud_hypervisor.rs # Cloud-Hypervisor implementation
+└── qemu.rs             # QEMU implementation (QMP over Unix socket)
 ```
 
 Both hypervisors implement the same interface:
@@ -255,11 +252,13 @@ For Cloud-Hypervisor, console output is captured via the `--console file` option
 
 ## Requirements
 
-- **Linux** (both hypervisors only support Linux)
+- **Linux** (all supported hypervisors are Linux-only)
 - **KVM** enabled (`/dev/kvm` accessible)
 - **Rust 1.85+** (for building)
-- **Firecracker 1.14.0+** (for Firecracker VMs)
-- **Cloud-Hypervisor 44.0+** (optional, for Cloud-Hypervisor VMs)
+- **Bun** (for the Vite + React dev server)
+- **Cloud-Hypervisor 50.0+** (default hypervisor)
+- **Firecracker 1.14.0+** (optional)
+- **QEMU** (`qemu-system-x86_64`, optional)
 
 ### Enabling KVM
 
@@ -278,7 +277,6 @@ sudo usermod -aG kvm $USER
 ```
 glidex/
 ├── Cargo.toml                    # Workspace root
-├── install.sh                    # Installation script
 ├── README.md
 └── crates/
     ├── glidex-control-plane/     # Control plane server
@@ -291,20 +289,20 @@ glidex/
     │   │   ├── hypervisor/       # Hypervisor abstraction layer
     │   │   │   ├── mod.rs        # Traits and HypervisorType enum
     │   │   │   ├── firecracker.rs    # Firecracker backend
-    │   │   │   └── cloud_hypervisor.rs # Cloud-Hypervisor backend
+    │   │   │   ├── cloud_hypervisor.rs # Cloud-Hypervisor backend
+    │   │   │   └── qemu.rs       # QEMU backend (QMP)
     │   │   └── bin/
     │   │       └── gxctl.rs      # CLI client
     │   └── tests/
     │       └── api_tests.rs      # API integration tests
-    └── glidex-ui/                # Web UI (Leptos)
-        ├── src/
-        │   ├── main.rs           # SSR server
-        │   ├── app.rs            # Root component
-        │   ├── api/              # API client
-        │   ├── components/       # UI components
-        │   └── pages/            # Page views
-        ├── style/                # Tailwind CSS
-        └── README.md             # UI documentation
+    ├── glidex-install/           # Installer (cargo run -p glidex-install)
+    │   └── src/main.rs
+    └── glidex-ui/                # Web UI (Vite + React)
+        ├── src/main.rs           # Dev server launcher (bun run dev)
+        └── ui/                   # Vite + React app
+            ├── package.json
+            ├── vite.config.ts
+            └── src/
 ```
 
 ## Development
@@ -358,6 +356,6 @@ MIT
 - [Firecracker](https://firecracker-microvm.github.io/) - microVM hypervisor
 - [Cloud-Hypervisor](https://www.cloudhypervisor.org/) - microVM hypervisor
 - [Axum](https://github.com/tokio-rs/axum) - Web framework
-- [Leptos](https://leptos.dev/) - Rust web framework for the UI
+- [Vite](https://vitejs.dev/) + [React](https://react.dev/) - Web UI stack
 - [Tokio](https://tokio.rs/) - Async runtime
 - [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework

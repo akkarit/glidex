@@ -2,6 +2,24 @@ use crate::hypervisor::HypervisorType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Expand a leading `~` or `~/` to the user's home directory. Hypervisors
+/// don't do shell-style expansion themselves, so paths like
+/// `~/.glidex/rootfs.ext4` need to be resolved before being passed to
+/// qemu-system-x86_64 / firecracker / cloud-hypervisor.
+fn expand_tilde(path: String) -> String {
+    if path == "~" {
+        return dirs::home_dir()
+            .map(|h| h.to_string_lossy().into_owned())
+            .unwrap_or(path);
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest).to_string_lossy().into_owned();
+        }
+    }
+    path
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum VmState {
@@ -78,8 +96,8 @@ impl From<CreateVmRequest> for VmConfig {
         VmConfig {
             vcpu_count: req.vcpu_count,
             mem_size_mib: req.mem_size_mib,
-            kernel_image_path: req.kernel_image_path,
-            rootfs_path: req.rootfs_path,
+            kernel_image_path: expand_tilde(req.kernel_image_path),
+            rootfs_path: expand_tilde(req.rootfs_path),
             kernel_args: req
                 .kernel_args
                 .unwrap_or_else(|| hypervisor.default_kernel_args().to_string()),

@@ -441,7 +441,7 @@ async fn handle_create(client: &CliClient) {
     };
 
     let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let default_kernel = format!("{}/.glidex/vmlinux", home_dir);
+    let default_kernel = format!("{}/.glidex/vmlinux.bin", home_dir);
     let default_rootfs = format!("{}/.glidex/rootfs.ext4", home_dir);
 
     let kernel_image_path = match prompt(&format!("Kernel image path [{}]: ", default_kernel)).as_str() {

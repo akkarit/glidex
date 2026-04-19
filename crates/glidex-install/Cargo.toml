@@ -1,0 +1,15 @@
+[package]
+name = "glidex-install"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "glidex-install"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+colored = "3"
+dirs = "6"
+libc = "0.2"
+tempfile = "3"
