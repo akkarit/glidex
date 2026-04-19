@@ -92,7 +92,7 @@ Memory (MiB) [512]: 1024
 Kernel image path [~/.glidex/vmlinux.bin]:
 Root filesystem path [~/.glidex/rootfs.ext4]:
 Kernel arguments (optional):
-Hypervisor [firecracker/cloudhypervisor/qemu] (default: cloudhypervisor):
+Hypervisor [firecracker/cloudhypervisor/qemu] (default: qemu):
 
 gxctl> start my-vm
 ```
@@ -158,10 +158,10 @@ gxctl> log my-vm
 }
 ```
 
-The `hypervisor` field is optional and defaults to `"cloudhypervisor"`. Supported values:
-- `"cloudhypervisor"` - Use Cloud-Hypervisor (default)
+The `hypervisor` field is optional and defaults to `"qemu"`. Supported values:
+- `"qemu"` - Use QEMU (default, requires `qemu-system-x86_64`)
+- `"cloudhypervisor"` - Use Cloud-Hypervisor
 - `"firecracker"` - Use Firecracker hypervisor
-- `"qemu"` - Use QEMU (requires `qemu-system-x86_64`)
 
 ### Example: Create and Start a VM with curl
 

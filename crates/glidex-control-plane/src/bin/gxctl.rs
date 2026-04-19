@@ -456,20 +456,20 @@ async fn handle_create(client: &CliClient) {
 
     let kernel_args = prompt_optional("Kernel arguments (optional, default: root=/dev/vda1 reboot=k panic=1): ");
 
-    let hypervisor = match prompt("Hypervisor [firecracker/cloudhypervisor/qemu] (default: cloudhypervisor): ")
+    let hypervisor = match prompt("Hypervisor [firecracker/cloudhypervisor/qemu] (default: qemu): ")
         .to_lowercase()
         .as_str()
     {
         "firecracker" | "fc" => Some("firecracker".to_string()),
-        "" | "cloudhypervisor" | "cloud-hypervisor" | "ch" => Some("cloudhypervisor".to_string()),
-        "qemu" | "q" => Some("qemu".to_string()),
+        "cloudhypervisor" | "cloud-hypervisor" | "ch" => Some("cloudhypervisor".to_string()),
+        "" | "qemu" | "q" => Some("qemu".to_string()),
         other => {
             println!(
-                "{} Unknown hypervisor '{}', using cloudhypervisor",
+                "{} Unknown hypervisor '{}', using qemu",
                 "Warning:".yellow(),
                 other
             );
-            Some("cloudhypervisor".to_string())
+            Some("qemu".to_string())
         }
     };
 

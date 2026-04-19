@@ -11,7 +11,7 @@ export default function CreateVmForm({ onSubmit, onCancel }: CreateVmFormProps) 
   const [name, setName] = useState("");
   const [vcpuCount, setVcpuCount] = useState(1);
   const [memSizeMib, setMemSizeMib] = useState(512);
-  const [hypervisor, setHypervisor] = useState<HypervisorType>("cloudhypervisor");
+  const [hypervisor, setHypervisor] = useState<HypervisorType>("qemu");
   const [kernelPath, setKernelPath] = useState("");
   const [rootfsPath, setRootfsPath] = useState("");
   const [kernelArgs, setKernelArgs] = useState("");

@@ -12,8 +12,8 @@ use thiserror::Error;
 #[serde(rename_all = "lowercase")]
 pub enum HypervisorType {
     Firecracker,
-    #[default]
     CloudHypervisor,
+    #[default]
     Qemu,
 }
 
@@ -41,7 +41,7 @@ impl HypervisorType {
         match self {
             HypervisorType::Firecracker => "console=ttyS0 reboot=k panic=1 pci=off",
             HypervisorType::CloudHypervisor => "root=/dev/vda1 reboot=k panic=1",
-            HypervisorType::Qemu => "console=ttyS0 root=/dev/vda1 reboot=k panic=1",
+            HypervisorType::Qemu => "console=ttyS0 root=/dev/vda reboot=k panic=1",
         }
     }
 }

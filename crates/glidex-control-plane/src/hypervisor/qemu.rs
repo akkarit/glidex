@@ -361,6 +361,10 @@ impl QemuInstance {
         let master_raw = master.as_raw_fd();
         let mut clients: Vec<UnixStream> = Vec::new();
         let mut buf = [0u8; 4096];
+        // PTY reads EOF once QEMU exits. We don't tear down the listener in
+        // that case — clients should still be able to connect and read the
+        // captured log to see *why* the guest died.
+        let mut pty_alive = true;
 
         unsafe {
             let flags = libc::fcntl(master_raw, libc::F_GETFL);
@@ -382,31 +386,33 @@ impl QemuInstance {
                 clients.push(stream);
             }
 
-            let master_file = unsafe { File::from_raw_fd(libc::dup(master_raw)) };
-            let mut master_reader = master_file;
-            match master_reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let data = &buf[..n];
-                    let _ = log_file.write_all(data);
-                    let _ = log_file.flush();
-                    clients.retain_mut(|client| client.write_all(data).is_ok());
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(_) => break,
-            }
-
-            for client in &mut clients {
-                match client.read(&mut buf) {
-                    Ok(0) => {}
+            if pty_alive {
+                let master_file = unsafe { File::from_raw_fd(libc::dup(master_raw)) };
+                let mut master_reader = master_file;
+                match master_reader.read(&mut buf) {
+                    Ok(0) => pty_alive = false,
                     Ok(n) => {
-                        let mut master_writer =
-                            unsafe { File::from_raw_fd(libc::dup(master_raw)) };
-                        let _ = master_writer.write_all(&buf[..n]);
-                        let _ = master_writer.flush();
+                        let data = &buf[..n];
+                        let _ = log_file.write_all(data);
+                        let _ = log_file.flush();
+                        clients.retain_mut(|client| client.write_all(data).is_ok());
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                    Err(_) => {}
+                    Err(_) => pty_alive = false,
+                }
+
+                for client in &mut clients {
+                    match client.read(&mut buf) {
+                        Ok(0) => {}
+                        Ok(n) => {
+                            let mut master_writer =
+                                unsafe { File::from_raw_fd(libc::dup(master_raw)) };
+                            let _ = master_writer.write_all(&buf[..n]);
+                            let _ = master_writer.flush();
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(_) => {}
+                    }
                 }
             }
 

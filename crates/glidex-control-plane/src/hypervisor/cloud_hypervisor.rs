@@ -421,6 +421,11 @@ impl CloudHypervisorProcessHandle {
         let pty_raw = pty_file.as_raw_fd();
         let mut clients: Vec<UnixStream> = Vec::new();
         let mut buf = [0u8; 4096];
+        // PTY reads EOF once cloud-hypervisor's virtio console closes. We
+        // don't tear down the listener in that case — clients should still
+        // be able to connect and replay the captured log to diagnose why
+        // the guest died.
+        let mut pty_alive = true;
 
         // Set PTY to non-blocking
         unsafe {
@@ -444,33 +449,36 @@ impl CloudHypervisorProcessHandle {
                 clients.push(stream);
             }
 
-            // Read from PTY and broadcast to clients + log file
-            let mut pty_reader = unsafe { File::from_raw_fd(libc::dup(pty_raw)) };
-            match pty_reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let data = &buf[..n];
-
-                    let _ = log_file.write_all(data);
-                    let _ = log_file.flush();
-
-                    clients.retain_mut(|client| client.write_all(data).is_ok());
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(_) => break,
-            }
-
-            // Read from clients and write to PTY
-            for client in &mut clients {
-                match client.read(&mut buf) {
-                    Ok(0) => {}
+            if pty_alive {
+                // Read from PTY and broadcast to clients + log file
+                let mut pty_reader = unsafe { File::from_raw_fd(libc::dup(pty_raw)) };
+                match pty_reader.read(&mut buf) {
+                    Ok(0) => pty_alive = false,
                     Ok(n) => {
-                        let mut pty_writer = unsafe { File::from_raw_fd(libc::dup(pty_raw)) };
-                        let _ = pty_writer.write_all(&buf[..n]);
-                        let _ = pty_writer.flush();
+                        let data = &buf[..n];
+
+                        let _ = log_file.write_all(data);
+                        let _ = log_file.flush();
+
+                        clients.retain_mut(|client| client.write_all(data).is_ok());
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                    Err(_) => {}
+                    Err(_) => pty_alive = false,
+                }
+
+                // Read from clients and write to PTY
+                for client in &mut clients {
+                    match client.read(&mut buf) {
+                        Ok(0) => {}
+                        Ok(n) => {
+                            let mut pty_writer =
+                                unsafe { File::from_raw_fd(libc::dup(pty_raw)) };
+                            let _ = pty_writer.write_all(&buf[..n]);
+                            let _ = pty_writer.flush();
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(_) => {}
+                    }
                 }
             }
 
