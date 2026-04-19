@@ -386,6 +386,10 @@ fn print_help() {
     println!("  {} - Delete a VM", "delete <name|id>".cyan());
     println!("  {}               - List host PCI devices", "pci".cyan());
     println!(
+        "  {}     - Show detailed info (incl. sysfs path) for one device",
+        "pci <address>".cyan()
+    );
+    println!(
         "  {} - Attach PCI device to VM",
         "attach-device <name|id> <path>".cyan()
     );
@@ -908,6 +912,25 @@ async fn handle_command(line: &str, client: &CliClient) -> bool {
             Ok(devices) => {
                 if devices.is_empty() {
                     println!("{}", "No PCI devices found".yellow());
+                } else if parts.len() >= 2 {
+                    // `pci <address>` shows full details for a single device,
+                    // including the sysfs path needed for VFIO attachment.
+                    match devices.iter().find(|d| d.address == parts[1]) {
+                        Some(dev) => {
+                            println!("Address:    {}", dev.address);
+                            println!("Vendor:     {}", dev.vendor_id);
+                            println!("Device:     {}", dev.device_id);
+                            println!("Class:      {}", dev.class_id);
+                            println!("Driver:     {}", display_option(&dev.driver));
+                            println!("IOMMU:      {}", display_option(&dev.iommu_group));
+                            println!("Sysfs path: {}", dev.sysfs_path);
+                        }
+                        None => println!(
+                            "{} no PCI device with address {}",
+                            "Error:".red(),
+                            parts[1]
+                        ),
+                    }
                 } else {
                     let table = Table::new(&devices).to_string();
                     println!("{}", table);
@@ -1041,5 +1064,35 @@ async fn main() {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pci_device_info_deserializes_sysfs_path() {
+        let json = r#"{
+            "address": "0000:00:1f.0",
+            "vendor_id": "8086",
+            "device_id": "9d4e",
+            "class_id": "060100",
+            "driver": "lpc_ich",
+            "iommu_group": "5",
+            "sysfs_path": "/sys/bus/pci/devices/0000:00:1f.0"
+        }"#;
+
+        let info: PciDeviceInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.sysfs_path, "/sys/bus/pci/devices/0000:00:1f.0");
+        assert_eq!(info.address, "0000:00:1f.0");
+        assert_eq!(info.driver.as_deref(), Some("lpc_ich"));
+        assert_eq!(info.iommu_group.as_deref(), Some("5"));
+    }
+
+    #[test]
+    fn display_option_renders_dash_for_none() {
+        assert_eq!(display_option(&None), "-");
+        assert_eq!(display_option(&Some("vfio-pci".to_string())), "vfio-pci");
     }
 }

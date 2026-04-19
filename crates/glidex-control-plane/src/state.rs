@@ -66,11 +66,23 @@ impl VmManager {
     pub fn with_db_path(db_path: PathBuf) -> Result<Arc<Self>, VmManagerError> {
         let store = VmStore::open(&db_path)?;
 
-        // Initialize hypervisor backends
+        // Initialize hypervisor backends and probe whether each binary is on PATH.
         let mut backends: HashMap<HypervisorType, Box<dyn Hypervisor>> = HashMap::new();
-        backends.insert(HypervisorType::Firecracker, create_backend(HypervisorType::Firecracker));
-        backends.insert(HypervisorType::CloudHypervisor, create_backend(HypervisorType::CloudHypervisor));
-        backends.insert(HypervisorType::Qemu, create_backend(HypervisorType::Qemu));
+        for ty in [
+            HypervisorType::Firecracker,
+            HypervisorType::CloudHypervisor,
+            HypervisorType::Qemu,
+        ] {
+            let backend = create_backend(ty);
+            if !backend.is_available() {
+                tracing::warn!(
+                    "Hypervisor {} binary {:?} not found on PATH — VMs configured for it will fail to start",
+                    backend.hypervisor_type(),
+                    ty.binary_name()
+                );
+            }
+            backends.insert(ty, backend);
+        }
 
         Ok(Arc::new(Self {
             vms: RwLock::new(HashMap::new()),
@@ -156,6 +168,20 @@ impl VmManager {
     }
 
     pub async fn create_vm(&self, name: String, config: VmConfig) -> Result<Vm, VmManagerError> {
+        // Reject obviously broken configurations before persisting them.
+        if config.vcpu_count == 0 {
+            return Err(HypervisorError::InvalidConfig(
+                "vcpu_count must be greater than 0".to_string(),
+            )
+            .into());
+        }
+        if config.mem_size_mib == 0 {
+            return Err(HypervisorError::InvalidConfig(
+                "mem_size_mib must be greater than 0".to_string(),
+            )
+            .into());
+        }
+
         let mut vms = self.vms.write().await;
 
         // Check if VM with same name exists
@@ -218,6 +244,15 @@ impl VmManager {
                     let _ = process.kill();
                     return Err(e.into());
                 }
+
+                tracing::info!(
+                    vm_id = %entry.vm.id,
+                    running = process.is_running(),
+                    socket = process.socket_path(),
+                    console = process.console_socket_path(),
+                    log = process.log_path(),
+                    "VM started"
+                );
 
                 entry.process = Some(process);
                 entry.vm.state = VmState::Running;

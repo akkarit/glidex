@@ -149,3 +149,110 @@ pub fn create_backend(hypervisor_type: HypervisorType) -> Box<dyn Hypervisor> {
         HypervisorType::Qemu => Box::new(qemu::QemuBackend),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binary_name_matches_hypervisor_type() {
+        assert_eq!(HypervisorType::Firecracker.binary_name(), "firecracker");
+        assert_eq!(
+            HypervisorType::CloudHypervisor.binary_name(),
+            "cloud-hypervisor"
+        );
+        assert_eq!(HypervisorType::Qemu.binary_name(), "qemu-system-x86_64");
+    }
+
+    #[test]
+    fn invalid_config_error_renders_message() {
+        let err = HypervisorError::InvalidConfig("bad vcpu count".to_string());
+        assert_eq!(
+            err.to_string(),
+            "Invalid configuration: bad vcpu count"
+        );
+    }
+
+    #[test]
+    fn backends_report_their_hypervisor_type() {
+        for ty in [
+            HypervisorType::Firecracker,
+            HypervisorType::CloudHypervisor,
+            HypervisorType::Qemu,
+        ] {
+            let backend = create_backend(ty);
+            assert_eq!(backend.hypervisor_type(), ty);
+            // Just exercise is_available — return value depends on host.
+            let _ = backend.is_available();
+        }
+    }
+
+    /// Minimal in-memory HypervisorProcess used to exercise trait accessors
+    /// without actually spawning a hypervisor.
+    struct StubProcess {
+        socket_path: String,
+        console_socket_path: String,
+        log_path: String,
+        running: std::sync::atomic::AtomicBool,
+    }
+
+    impl HypervisorProcess for StubProcess {
+        fn configure(&self, _config: &VmConfig) -> Result<(), HypervisorError> {
+            Ok(())
+        }
+        fn start(&self) -> Result<(), HypervisorError> {
+            Ok(())
+        }
+        fn pause(&self) -> Result<(), HypervisorError> {
+            Ok(())
+        }
+        fn resume(&self) -> Result<(), HypervisorError> {
+            Ok(())
+        }
+        fn kill(&self) -> Result<(), HypervisorError> {
+            self.running
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        fn is_running(&self) -> bool {
+            self.running.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn socket_path(&self) -> &str {
+            &self.socket_path
+        }
+        fn console_socket_path(&self) -> &str {
+            &self.console_socket_path
+        }
+        fn log_path(&self) -> &str {
+            &self.log_path
+        }
+    }
+
+    #[test]
+    fn hypervisor_process_accessors_round_trip() {
+        let proc: Box<dyn HypervisorProcess> = Box::new(StubProcess {
+            socket_path: "/tmp/sock".to_string(),
+            console_socket_path: "/tmp/console".to_string(),
+            log_path: "/tmp/log".to_string(),
+            running: std::sync::atomic::AtomicBool::new(true),
+        });
+
+        assert_eq!(proc.socket_path(), "/tmp/sock");
+        assert_eq!(proc.console_socket_path(), "/tmp/console");
+        assert_eq!(proc.log_path(), "/tmp/log");
+        assert!(proc.is_running());
+
+        // Default add_device / remove_device should report Unsupported.
+        assert!(matches!(
+            proc.add_device("0000:00:1f.0"),
+            Err(HypervisorError::Unsupported(_))
+        ));
+        assert!(matches!(
+            proc.remove_device("0000:00:1f.0"),
+            Err(HypervisorError::Unsupported(_))
+        ));
+
+        proc.kill().unwrap();
+        assert!(!proc.is_running());
+    }
+}
