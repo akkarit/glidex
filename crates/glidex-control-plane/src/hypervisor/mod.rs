@@ -40,7 +40,7 @@ impl HypervisorType {
     pub fn default_kernel_args(&self) -> &'static str {
         match self {
             HypervisorType::Firecracker => "console=ttyS0 reboot=k panic=1 pci=off",
-            HypervisorType::CloudHypervisor => "root=/dev/vda1 reboot=k panic=1",
+            HypervisorType::CloudHypervisor => "console=hvc0 root=/dev/vda reboot=k panic=1",
             HypervisorType::Qemu => "console=ttyS0 root=/dev/vda reboot=k panic=1",
         }
     }

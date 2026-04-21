@@ -458,7 +458,7 @@ async fn handle_create(client: &CliClient) {
         s => s.to_string(),
     };
 
-    let kernel_args = prompt_optional("Kernel arguments (optional, default: root=/dev/vda1 reboot=k panic=1): ");
+    let kernel_args = prompt_optional("Kernel arguments (optional, default: root=/dev/vda reboot=k panic=1): ");
 
     let hypervisor = match prompt("Hypervisor [firecracker/cloudhypervisor/qemu] (default: qemu): ")
         .to_lowercase()

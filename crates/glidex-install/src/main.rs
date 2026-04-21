@@ -579,8 +579,9 @@ fn download_samples(platform: &Platform) -> Result<()> {
             "curl -fsSL 'http://spec.ccfc.min.s3.amazonaws.com/?prefix={}&list-type=2'",
             prefix
         ))?;
-        let kernel_key = pick_latest_key(&listing, &prefix)
-            .context("Could not find kernel image in S3 listing")?;
+        let kernel_key =
+            pick_latest_key_matching(&listing, &prefix, |k| !k.ends_with(".config"))
+                .context("Could not find kernel image in S3 listing")?;
         let url = format!("https://s3.amazonaws.com/spec.ccfc.min/{}", kernel_key);
         println!("Downloading kernel: {}", kernel_key);
         download(&url, &kernel_path)?;
@@ -704,11 +705,8 @@ fn ensure_squashfs_tools() -> Result<()> {
 }
 
 /// Pull all `<Key>…</Key>` entries from an S3 XML listing that start with
-/// `prefix`, then return the one with the highest numeric version.
-fn pick_latest_key(xml: &str, prefix: &str) -> Option<String> {
-    pick_latest_key_matching(xml, prefix, |_| true)
-}
-
+/// `prefix` and pass `filter`, then return the one with the highest numeric
+/// version.
 fn pick_latest_key_matching(
     xml: &str,
     prefix: &str,
